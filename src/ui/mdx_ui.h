@@ -20,7 +20,7 @@
 #include <genesis.h>
 
 
-/* Screen identifiers. Performance + Patch Manager are later waves. */
+/* Screen identifiers. */
 typedef enum
 {
     SCREEN_MAIN = 0,
@@ -29,6 +29,7 @@ typedef enum
     SCREEN_ENVELOPE,
     SCREEN_MODULATION,
     SCREEN_PATCH,        /* Patch Manager (save/load to SRAM) */
+    SCREEN_PERFORMANCE,  /* Virtual keyboard / performance (Wave 5) */
     SCREEN_COUNT
 } MdxScreen;
 
