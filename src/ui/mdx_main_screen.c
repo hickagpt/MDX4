@@ -21,9 +21,10 @@
 #define ROW_ENVELOPE   5
 #define ROW_MODULATION 6
 #define ROW_PATCH      8
+#define ROW_PERFORMANCE 9
 
 /* sel index -> cursor row. */
-static const u8 s_row[5] = { ROW_ALGORITHM, ROW_OPERATOR, ROW_ENVELOPE, ROW_MODULATION, ROW_PATCH };
+static const u8 s_row[6] = { ROW_ALGORITHM, ROW_OPERATOR, ROW_ENVELOPE, ROW_MODULATION, ROW_PATCH, ROW_PERFORMANCE };
 
 static FMPatch s_patch;     /* snapshot of current patch (refreshed on Enter) */
 static u8      s_sel   = 0; /* 0..4 */
@@ -92,6 +93,13 @@ static void draw_patch(void)
     MdxUi_DrawText(18, ROW_PATCH, "<A>");
 }
 
+static void draw_performance(void)
+{
+    MdxUi_ClearLine(ROW_PERFORMANCE);
+    MdxUi_DrawText(1, ROW_PERFORMANCE, "PERFORMANCE");
+    MdxUi_DrawText(16, ROW_PERFORMANCE, "<A>");
+}
+
 
 static void draw_key(void)
 {
@@ -124,6 +132,7 @@ void MdxMainScreen_Enter(void)
     draw_envelope();
     draw_modulation();
     draw_patch();
+    draw_performance();
     draw_key();
 
     MdxUi_ClearLine(10);
@@ -141,7 +150,7 @@ void MdxMainScreen_Handle(const void* input)
     if (i == NULL) return;
 
     /* selection */
-    if (i->down) { if (s_sel < 4) s_sel++; MdxUi_MoveCursor(0, s_row[s_sel]); }
+    if (i->down) { if (s_sel < 5) s_sel++; MdxUi_MoveCursor(0, s_row[s_sel]); }
     if (i->up)   { if (s_sel > 0) s_sel--; MdxUi_MoveCursor(0, s_row[s_sel]); }
 
     /* open sub-screen */
@@ -154,6 +163,7 @@ void MdxMainScreen_Handle(const void* input)
             case 2: MdxUi_SetScreen(SCREEN_ENVELOPE);   return;
             case 3: MdxUi_SetScreen(SCREEN_MODULATION); return;
             case 4: MdxUi_SetScreen(SCREEN_PATCH);      return;
+            case 5: MdxUi_SetScreen(SCREEN_PERFORMANCE); return;
             default: break;
         }
     }

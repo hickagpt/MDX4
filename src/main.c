@@ -25,6 +25,7 @@
 #include "ui/mdx_envelope_screen.h"
 #include "ui/mdx_modulation_screen.h"
 #include "ui/mdx_patch_screen.h"
+#include "ui/mdx_performance_screen.h"
 
 
 int main(bool hardReset)
@@ -52,6 +53,7 @@ int main(bool hardReset)
     MdxOperatorScreen_Init();
     MdxEnvelopeScreen_Init();
     MdxModulationScreen_Init();
+    MdxPerformanceScreen_Init();
 
     /* Start on the main screen, then run the VBlank-tied UI loop. */
     MdxUi_SetScreen(SCREEN_MAIN);
