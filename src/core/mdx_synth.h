@@ -38,6 +38,13 @@ void MdxSynth_SetOperator(u8 opIndex, const FMOperator* op);
 void MdxSynth_SetAlgorithm(u8 algo);
 void MdxSynth_SetFeedback(u8 fb);
 
+/* Live LFO controls (0x22 global + 0xB4 AMS/PMS). Applied immediately; no
+ * retrigger required (unlike algorithm/feedback). */
+void MdxSynth_SetLfoEnabled(u8 enabled);
+void MdxSynth_SetLfoFrequency(u8 freq);
+void MdxSynth_SetLfoPitchDepth(u8 pms);
+void MdxSynth_SetLfoAmplitudeDepth(u8 ams);
+
 /* Note on (MIDI note number) / off. */
 void MdxSynth_NoteOn(u8 note);
 void MdxSynth_NoteOff(void);

@@ -116,6 +116,34 @@ void MdxSynth_SetFeedback(u8 fb)
 }
 
 
+void MdxSynth_SetLfoEnabled(u8 enabled)
+{
+    g_patch.lfoEnabled = enabled ? 1 : 0;
+    g_ch1B4 = MdxLfo_Apply(1, &g_patch);
+}
+
+
+void MdxSynth_SetLfoFrequency(u8 freq)
+{
+    g_patch.lfoFrequency = (freq > 7) ? 7 : freq;
+    g_ch1B4 = MdxLfo_Apply(1, &g_patch);
+}
+
+
+void MdxSynth_SetLfoPitchDepth(u8 pms)
+{
+    g_patch.lfoPitchDepth = (pms > 7) ? 7 : pms;
+    g_ch1B4 = MdxLfo_Apply(1, &g_patch);
+}
+
+
+void MdxSynth_SetLfoAmplitudeDepth(u8 ams)
+{
+    g_patch.lfoAmplitudeDepth = (ams > 3) ? 3 : ams;
+    g_ch1B4 = MdxLfo_Apply(1, &g_patch);
+}
+
+
 void MdxSynth_NoteOn(u8 note)
 {
     g_currentNote = (note > 127) ? 127 : note;
