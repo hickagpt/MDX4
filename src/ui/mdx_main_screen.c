@@ -13,6 +13,7 @@
 #include "core/mdx_synth.h"
 #include "core/mdx_patch.h"
 #include "core/mdx_algorithm.h"
+#include "ui/mdx_gfx.h"   /* MDXGFX SMOKE TEST (BUILD WAVE 1) - remove block below with this */
 
 
 /* Selectable rows on this screen. */
@@ -134,6 +135,11 @@ void MdxMainScreen_Enter(void)
     draw_patch();
     draw_performance();
     draw_key();
+
+    /* === MDXGFX SMOKE TEST (BUILD WAVE 1) - remove this block + the include above === */
+    MdxGfx_Init();                 /* generate chrome tiles + PALs */
+    MdxGfx_DrawPanel(1, 24, 18, 3); /* exercise the toolkit; harmless, bottom of screen */
+    /* === end MDXGFX SMOKE TEST === */
 
     MdxUi_ClearLine(10);
     MdxUi_DrawText(1, 10, "A:EDIT  B:BACK  C:PLAY  START:MENU");
