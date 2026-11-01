@@ -20,12 +20,13 @@
 #define ROW_OPERATOR   3
 #define ROW_ENVELOPE   5
 #define ROW_MODULATION 6
+#define ROW_PATCH      8
 
 /* sel index -> cursor row. */
-static const u8 s_row[4] = { ROW_ALGORITHM, ROW_OPERATOR, ROW_ENVELOPE, ROW_MODULATION };
+static const u8 s_row[5] = { ROW_ALGORITHM, ROW_OPERATOR, ROW_ENVELOPE, ROW_MODULATION, ROW_PATCH };
 
 static FMPatch s_patch;     /* snapshot of current patch (refreshed on Enter) */
-static u8      s_sel   = 0; /* 0..3 */
+static u8      s_sel   = 0; /* 0..4 */
 static u8      s_keyOn = 0; /* last drawn performance status                */
 
 
@@ -84,6 +85,14 @@ static void draw_modulation(void)
     MdxUi_DrawText(15, ROW_MODULATION, "<A>");
 }
 
+static void draw_patch(void)
+{
+    MdxUi_ClearLine(ROW_PATCH);
+    MdxUi_DrawText(1, ROW_PATCH, "PATCH MANAGER");
+    MdxUi_DrawText(18, ROW_PATCH, "<A>");
+}
+
+
 static void draw_key(void)
 {
     MdxUi_ClearLine(7);
@@ -114,10 +123,11 @@ void MdxMainScreen_Enter(void)
     draw_op_params();
     draw_envelope();
     draw_modulation();
+    draw_patch();
     draw_key();
 
-    MdxUi_ClearLine(9);
-    MdxUi_DrawText(1, 9, "A:EDIT  B:BACK  C:PLAY  START:MENU");
+    MdxUi_ClearLine(10);
+    MdxUi_DrawText(1, 10, "A:EDIT  B:BACK  C:PLAY  START:MENU");
 
     MdxUi_MoveCursor(0, s_row[s_sel]);
 }
@@ -131,7 +141,7 @@ void MdxMainScreen_Handle(const void* input)
     if (i == NULL) return;
 
     /* selection */
-    if (i->down) { if (s_sel < 3) s_sel++; MdxUi_MoveCursor(0, s_row[s_sel]); }
+    if (i->down) { if (s_sel < 4) s_sel++; MdxUi_MoveCursor(0, s_row[s_sel]); }
     if (i->up)   { if (s_sel > 0) s_sel--; MdxUi_MoveCursor(0, s_row[s_sel]); }
 
     /* open sub-screen */
@@ -143,6 +153,7 @@ void MdxMainScreen_Handle(const void* input)
             case 1: MdxUi_SetScreen(SCREEN_OPERATOR);   return;
             case 2: MdxUi_SetScreen(SCREEN_ENVELOPE);   return;
             case 3: MdxUi_SetScreen(SCREEN_MODULATION); return;
+            case 4: MdxUi_SetScreen(SCREEN_PATCH);      return;
             default: break;
         }
     }

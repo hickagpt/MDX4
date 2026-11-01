@@ -28,6 +28,7 @@ typedef enum
     SCREEN_OPERATOR,
     SCREEN_ENVELOPE,
     SCREEN_MODULATION,
+    SCREEN_PATCH,        /* Patch Manager (save/load to SRAM) */
     SCREEN_COUNT
 } MdxScreen;
 
