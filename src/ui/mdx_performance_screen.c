@@ -120,7 +120,8 @@ static void draw_note_readout(void)
 {
     const u8  pc   = s_selNote % 12;
     const u8  oct  = (u8)(s_selNote / 12 - 1);
-    char      buf[10];
+    /* Worst case "NOTE C# 6  84" is 13 chars + NUL = 14; size 16 to be safe. */
+    char      buf[16];
     const char* nm = s_noteName[pc];
     char*     p = buf;
     const char* s;
