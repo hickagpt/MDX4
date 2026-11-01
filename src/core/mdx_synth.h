@@ -49,6 +49,12 @@ void MdxSynth_SetLfoAmplitudeDepth(u8 ams);
 void MdxSynth_NoteOn(u8 note);
 void MdxSynth_NoteOff(void);
 
+/* Per-frame service (call once per VBlank from the UI loop). Completes any
+ * deferred retrigger queued last frame and runs the stuck-note watchdog:
+ * pass userHolding=TRUE while the play button is held so an intentionally
+ * sustained note is not force-released. */
+void MdxSynth_Frame(bool userHolding);
+
 /* Snapshot the current patch (clamped copy) for UI display. Read-only. */
 void MdxSynth_GetPatch(FMPatch* out);
 

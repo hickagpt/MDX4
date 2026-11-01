@@ -246,12 +246,19 @@ void MdxUi_Run(void)
 
         MdxInput_Poll(&inp);
 
+        /* Per-frame engine service: complete deferred retriggers and run the
+         * stuck-note watchdog. While C is held the note is intentionally
+         * sustained, so the watchdog is pet (not fired). */
+        MdxSynth_Frame(MdxInput_Held(BUTTON_C) ? TRUE : FALSE);
+
         /* Start always returns to the main screen (SPEC 4.3). */
         if (inp.start) MdxUi_SetScreen(SCREEN_MAIN);
 
-        /* C-button note preview: edge-on -> NoteOn, release -> NoteOff.
-         * A note started here keeps sounding while the user navigates and
-         * edits other screens (engine is never stalled). */
+        /* C-button note preview: edge-on -> NoteOn, release -> NoteOff. A note
+         * started here keeps sounding while the user navigates and edits other
+         * screens (engine is never stalled). On the performance screen the
+         * keyboard owns C, so the global preview is skipped there. */
+        if (MdxUi_GetScreen() != SCREEN_PERFORMANCE)
         {
             const u8 cHeld = MdxInput_Held(BUTTON_C) ? 1 : 0;
             if (cHeld && !prevCHeld)
