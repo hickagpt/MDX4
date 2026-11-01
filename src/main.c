@@ -54,6 +54,7 @@ int main(bool hardReset)
     MdxEnvelopeScreen_Init();
     MdxModulationScreen_Init();
     MdxPerformanceScreen_Init();
+    MdxPatchScreen_Init();
 
     /* Start on the main screen, then run the VBlank-tied UI loop. */
     MdxUi_SetScreen(SCREEN_MAIN);
