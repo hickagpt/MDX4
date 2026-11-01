@@ -13,7 +13,168 @@
 #include "core/mdx_synth.h"
 #include "core/mdx_patch.h"
 #include "core/mdx_algorithm.h"
-#include "ui/mdx_gfx.h"   /* MDXGFX SMOKE TEST (BUILD WAVE 1) - remove block below with this */
+#include "ui/mdx_gfx.h"   /* MdxGfx toolkit: Init, PlotTile, PAL2 chrome, base tiles */
+
+/* snapshot of current patch (refreshed on Enter), selection + key status.
+ * Declared before the mini-diagram helpers so draw_mini_diagram() can read s_patch. */
+static FMPatch s_patch;
+static u8      s_sel   = 0;
+static u8      s_keyOn = 0;
+
+
+/* ---------------------------------------------------------------------------
+ * Mini routing diagram (W5): compact operator stack S1(top)..S4(bottom),
+ * derived purely from MdxAlgorithm_GetTopology(s_patch.algorithm). Carrier
+ * interior = PAL2 colour 3 (bright); modulator interior = PAL2 colour 2 (dim);
+ * the current operator (MdxUi_GetOperator()) is highlighted (colour 1).
+ *
+ * Runtime-generated tiles (no assets). All indices >= 0x0196 so they never
+ * collide with the font (0..~0x60), cursor (0x0100), base tiles (0x0120..0x012C),
+ * W2 (0x0130..0x0135) or W3 (0x0136..0x0195). Used range: 0x0196 .. 0x019B.
+ *   0x0196 MINI_MODFILL  modulator interior (PAL2 colour 2, dim)
+ *   0x0197 MINI_CARFILL  carrier interior   (PAL2 colour 3, bright)
+ *   0x0198 MINI_SELFILL  current-op highlight (PAL2 colour 1, bright)
+ *   0x0199 MINI_VLINE    vertical link segment (PAL2 colour 1)
+ *   0x019A MINI_HSTUB    horizontal link stub  (PAL2 colour 1)
+ *   0x019B MINI_BLANK    transparent clear/erase (PAL2 colour 0)
+ * ------------------------------------------------------------------------- */
+#define MINI_MODFILL   0x0196
+#define MINI_CARFILL   0x0197
+#define MINI_SELFILL   0x0198
+#define MINI_VLINE     0x0199
+#define MINI_HSTUB     0x019A
+#define MINI_BLANK     0x019B
+
+#define MINI_NODE_W      6
+#define MINI_NODE_H      3
+#define MINI_NODE_LEFT   9
+#define MINI_TOP0        12
+#define MINI_STEP        4
+#define MINI_LANE_BASE   4
+#define MINI_X0          1
+#define MINI_Y0          11
+#define MINI_W           18
+#define MINI_H           16
+
+static bool s_miniTilesReady = FALSE;
+
+#define MINI_CHR(idx)  TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (idx))
+#define MINI_BORD(idx) TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (MDXGFX_TILE_BASE + (idx)))
+
+
+/* --- Mini-diagram tile generation (runtime, once). --- */
+
+static void mini_gen_tiles(void)
+{
+    u32 t[8];
+    u8 a, b;
+
+    if (s_miniTilesReady) return;
+    s_miniTilesReady = TRUE;
+
+    /* MODFILL: solid dim colour 2. */
+    for (a = 0; a < 8; a++) t[a] = 0;
+    for (a = 0; a < 8; a++) for (b = 0; b < 8; b++) MdxGfx_PlotTile(t, b, a, 2);
+    VDP_loadTileData(t, MINI_MODFILL, 1, DMA);
+
+    /* CARFILL: solid bright colour 3. */
+    for (a = 0; a < 8; a++) t[a] = 0;
+    for (a = 0; a < 8; a++) for (b = 0; b < 8; b++) MdxGfx_PlotTile(t, b, a, 3);
+    VDP_loadTileData(t, MINI_CARFILL, 1, DMA);
+
+    /* SELFILL: solid bright colour 1 (current-op highlight). */
+    for (a = 0; a < 8; a++) t[a] = 0;
+    for (a = 0; a < 8; a++) for (b = 0; b < 8; b++) MdxGfx_PlotTile(t, b, a, 1);
+    VDP_loadTileData(t, MINI_SELFILL, 1, DMA);
+
+    /* VLINE: 2px vertical line (cols 3-4), colour 1. */
+    for (a = 0; a < 8; a++) t[a] = 0;
+    for (a = 0; a < 8; a++) { MdxGfx_PlotTile(t, 3, a, 1); MdxGfx_PlotTile(t, 4, a, 1); }
+    VDP_loadTileData(t, MINI_VLINE, 1, DMA);
+
+    /* HSTUB: 2px horizontal line (rows 3-4), colour 1. */
+    for (a = 0; a < 8; a++) t[a] = 0;
+    for (a = 0; a < 8; a++) { MdxGfx_PlotTile(t, a, 3, 1); MdxGfx_PlotTile(t, a, 4, 1); }
+    VDP_loadTileData(t, MINI_HSTUB, 1, DMA);
+
+    /* BLANK: all transparent colour 0 (already zeroed). */
+    for (a = 0; a < 8; a++) t[a] = 0;
+    VDP_loadTileData(t, MINI_BLANK, 1, DMA);
+}
+
+/* Bordered box: bright border (reusing MdxGfx base border tiles) + solid interior. */
+static void mini_draw_box(u16 x, u16 y, u16 w, u16 h, u16 fill)
+{
+    if ((w < 2) || (h < 2)) return;
+
+    VDP_fillTileMapRect(BG_A, MINI_CHR(fill), x + 1, y + 1, w - 2, h - 2);
+
+    VDP_setTileMapXY(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_TL), x,         y);
+    VDP_setTileMapXY(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_TR), x + w - 1, y);
+    VDP_setTileMapXY(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_BL), x,         y + h - 1);
+    VDP_setTileMapXY(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_BR), x + w - 1, y + h - 1);
+
+    if (w > 2)
+    {
+        VDP_fillTileMapRect(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_T), x + 1,     y,         w - 2, 1);
+        VDP_fillTileMapRect(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_B), x + 1,     y + h - 1, w - 2, 1);
+    }
+    if (h > 2)
+    {
+        VDP_fillTileMapRect(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_L), x,     y + 1,     1, h - 2);
+        VDP_fillTileMapRect(BG_A, MINI_BORD(MDXGFX_TILE_BORDER_R), x + w - 1, y + 1, 1, h - 2);
+    }
+}
+
+/* Mini routing diagram: 4 operator cells S1(top)..S4(bottom) with carrier/
+ * modulator colouring and the current operator highlighted, plus modulation
+ * links derived from the topology. */
+static void draw_mini_diagram(void)
+{
+    const MdxAlgTopology* topo = MdxAlgorithm_GetTopology(s_patch.algorithm);
+    const u8 cur = MdxUi_GetOperator();
+    const u16 top[4] = { MINI_TOP0, MINI_TOP0 + MINI_STEP, MINI_TOP0 + 2 * MINI_STEP, MINI_TOP0 + 3 * MINI_STEP };
+    u8 op, i, j;
+    char lbl[3];
+
+    /* clear only the mini-diagram region (keeps NAME/OP/ALG/header/cursor) */
+    VDP_fillTileMapRect(BG_A, MINI_CHR(MINI_BLANK), MINI_X0, MINI_Y0, MINI_W, MINI_H);
+
+    MdxUi_DrawText(1, MINI_Y0, "ROUTING");
+
+    /* links first (under the nodes) */
+    for (i = 1; i < 4; i++)
+    {
+        for (j = 0; j < i; j++)
+        {
+            if (topo->modulators[i] & (1u << j))
+            {
+                const u16 lane   = (u16)(MINI_LANE_BASE + j);
+                const u16 srcBot = (u16)(top[j] + MINI_NODE_H - 1);
+                const u16 dstTop = top[i];
+                u16 c, r;
+
+                for (c = lane; c < MINI_NODE_LEFT; c++)
+                    VDP_setTileMapXY(BG_A, MINI_CHR(MINI_HSTUB), c, srcBot);
+                for (r = (u16)(srcBot + 1); r < dstTop; r++)
+                    VDP_setTileMapXY(BG_A, MINI_CHR(MINI_VLINE), lane, r);
+                for (c = lane; c < MINI_NODE_LEFT; c++)
+                    VDP_setTileMapXY(BG_A, MINI_CHR(MINI_HSTUB), c, dstTop);
+            }
+        }
+    }
+
+    /* nodes: carrier/modulator colouring, current operator highlighted */
+    for (op = 0; op < 4; op++)
+    {
+        const u8  carrier = (topo->carrierMask & (1u << op)) ? 1 : 0;
+        const u16 fill    = (op == cur) ? MINI_SELFILL : (carrier ? MINI_CARFILL : MINI_MODFILL);
+
+        mini_draw_box(MINI_NODE_LEFT, top[op], MINI_NODE_W, MINI_NODE_H, fill);
+        lbl[0] = 'S'; lbl[1] = (char)('1' + op); lbl[2] = '\0';
+        MdxUi_DrawText(MINI_NODE_LEFT + 2, (u16)(top[op] + 1), lbl);
+    }
+}
 
 
 /* Selectable rows on this screen. */
@@ -26,10 +187,6 @@
 
 /* sel index -> cursor row. */
 static const u8 s_row[6] = { ROW_ALGORITHM, ROW_OPERATOR, ROW_ENVELOPE, ROW_MODULATION, ROW_PATCH, ROW_PERFORMANCE };
-
-static FMPatch s_patch;     /* snapshot of current patch (refreshed on Enter) */
-static u8      s_sel   = 0; /* 0..4 */
-static u8      s_keyOn = 0; /* last drawn performance status                */
 
 
 /* --- per-row redraw helpers (clear the line, then draw). --- */
@@ -116,6 +273,9 @@ static void draw_key(void)
 void MdxMainScreen_Enter(void)
 {
     /* full render once */
+    MdxGfx_Init();          /* generate chrome palette + base tiles (idempotent).
+                               Main screen boots FIRST, so the toolkit MUST init here. */
+    mini_gen_tiles();       /* generate the mini-diagram's own tiles (once) */
     MdxSynth_GetPatch(&s_patch);
     s_sel = 0;
     s_keyOn = MdxSynth_IsKeyOn() ? 1 : 0;
@@ -135,11 +295,7 @@ void MdxMainScreen_Enter(void)
     draw_patch();
     draw_performance();
     draw_key();
-
-    /* === MDXGFX SMOKE TEST (BUILD WAVE 1) - remove this block + the include above === */
-    MdxGfx_Init();                 /* generate chrome tiles + PALs */
-    MdxGfx_DrawPanel(1, 24, 18, 3); /* exercise the toolkit; harmless, bottom of screen */
-    /* === end MDXGFX SMOKE TEST === */
+    draw_mini_diagram();           /* W5: mini routing diagram in the free region */
 
     MdxUi_ClearLine(10);
     MdxUi_DrawText(1, 10, "A:EDIT  B:BACK  C:PLAY  START:MENU");
@@ -189,6 +345,7 @@ void MdxMainScreen_Handle(const void* input)
                 MdxSynth_SetAlgorithm(a);
                 s_patch.algorithm = a;
                 draw_algorithm();
+                draw_mini_diagram();
                 break;
             }
             case 1:   /* selected operator: cycle 1..4 (display only) */
@@ -199,6 +356,7 @@ void MdxMainScreen_Handle(const void* input)
                 draw_operator();
                 draw_op_params();
                 draw_envelope();
+                draw_mini_diagram();
                 break;
             }
             case 3:   /* feedback: clamp 0..7 */

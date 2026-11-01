@@ -10,6 +10,7 @@
 #include "input/mdx_input.h"
 #include "core/mdx_synth.h"
 #include "core/mdx_patch.h"
+#include "ui/mdx_gfx.h"    /* MdxGfx toolkit: DrawHBar, PAL2 chrome, base tiles */
 
 
 #define ROW0      1          /* first parameter row */
@@ -86,9 +87,11 @@ static void set_val(u8 idx, u8 v)
 static void draw_param(u8 idx)
 {
     const u16 row = (u16)(ROW0 + idx);
+    const u8  v   = get_val(idx);
     MdxUi_ClearLine(row);
     MdxUi_DrawText(1, row, s_param[idx].name);
-    MdxUi_DrawNumber(8, row, get_val(idx), 3);
+    MdxGfx_DrawHBar(12, row, 16, v, s_param[idx].max);   /* graphical slider */
+    MdxUi_DrawNumber(30, row, v, 3);                     /* keep numeric readout */
 }
 
 
@@ -117,6 +120,7 @@ static void draw_header(void)
 void MdxOperatorScreen_Enter(void)
 {
     FMPatch p;
+    MdxGfx_Init();          /* generate chrome palette + base tiles (idempotent) */
     MdxSynth_GetPatch(&p);
     s_op = p.operators[MdxUi_GetOperator()];
     s_sel = 0;

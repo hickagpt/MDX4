@@ -22,6 +22,7 @@
 
 #include "mdx_performance_screen.h"
 
+#include "mdx_gfx.h"
 #include "mdx_ui.h"
 #include "input/mdx_input.h"
 #include "core/mdx_synth.h"
@@ -154,10 +155,13 @@ static void draw_keyboard(void)
 
     for (i = 0; i < KB_COUNT; i++)
     {
-        char ch[2];
-        ch[0] = s_chroma[(u8)((KB_BASE + i) % 12)];
-        ch[1] = '\0';
-        VDP_drawText(ch, (s16)col, (s16)KB_ROW);
+        const u8   pc      = (u8)((KB_BASE + i) % 12);
+        const u16  tileIdx = MdxGfx_KeyTile(
+            ((pc == 1) || (pc == 3) || (pc == 6) || (pc == 8) || (pc == 10))
+                ? MDXGFX_KEY_BLACK : MDXGFX_KEY_WHITE);
+        VDP_setTileMapXY(BG_A,
+                         TILE_ATTR_FULL(MDXGFX_PAL_KEYS, 0, FALSE, FALSE, tileIdx),
+                         (u16)col, KB_ROW);
         col++;
     }
 }
@@ -257,6 +261,8 @@ static void enter_play(void)
 
 void MdxPerformanceScreen_Enter(void)
 {
+    MdxGfx_Init();              /* ensure PAL3 + white/black key tiles exist */
+
     s_selNote  = KB_BASE;
     s_playNote = 0xFF;
     s_playing  = FALSE;
