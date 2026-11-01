@@ -1,0 +1,17 @@
+# Build artifacts (generated, not committed)
+out/
+
+# OS / editor noise
+.DS_Store
+*.swp
+*~
+.vscode/
+
+# Vendored SGDK (large external toolchain; present locally, not committed)
+vendor/
+
+# SGDK build-generated boot files (copied into src/ at build time)
+src/boot/
+
+# OMO internal working directory
+.omo/
