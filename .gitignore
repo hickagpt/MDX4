@@ -1,6 +1,10 @@
 # Build artifacts (generated, not committed)
 out/
 
+# Host-side register-trace harness build artifacts (rebuildable from tools/host_test/*.c)
+tools/host_test/*.exe
+tools/host_test/*.obj
+
 # OS / editor noise
 .DS_Store
 *.swp
