@@ -17,12 +17,14 @@
 
 #include "core/mdx_synth.h"
 #include "input/mdx_input.h"
+#include "storage/mdx_storage.h"
 #include "ui/mdx_ui.h"
 #include "ui/mdx_main_screen.h"
 #include "ui/mdx_algorithm_screen.h"
 #include "ui/mdx_operator_screen.h"
 #include "ui/mdx_envelope_screen.h"
 #include "ui/mdx_modulation_screen.h"
+#include "ui/mdx_patch_screen.h"
 
 
 int main(bool hardReset)
@@ -33,6 +35,10 @@ int main(bool hardReset)
     SYS_disableInts();
     MdxUi_Init();
     SYS_enableInts();
+
+    /* Enable the SRAM window + run the presence self-test (no-op-guarded if no
+     * writable backup RAM is present). Must run before any SRAM access. */
+    MdxStorage_Init();
 
     /* Boot the YM2612 driver + load the default patch (channel 1, 4-op FM). */
     MdxSynth_Init();
