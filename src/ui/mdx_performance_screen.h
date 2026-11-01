@@ -13,10 +13,12 @@
  *   - moving the selection to a NEW note always releases the previous note and
  *     plays the new one - a note is never left stuck.
  *
- * All audible changes go through the engine (MdxSynth_NoteOn/NoteOff); the
- * engine remains the single owner of channel 1 and keeps sounding across the
- * transition back to other screens. Pitch control + modulation are added in a
- * later wave (see mdx_performance_screen.c).
+ * An A-toggled EDIT overlay adds a controller-driven pitch bend (portamento on
+ * the sounding note) and the improved modulation controls (feedback + LFO
+ * frequency + LFO pitch depth). All audible changes go through the engine
+ * (MdxSynth_NoteOn/NoteOff / SetFeedback / SetLfo*); the engine remains the
+ * single owner of channel 1 and keeps sounding across screen transitions. No
+ * MIDI (deferred per SPEC 7.3).
  */
 
 #include <genesis.h>
