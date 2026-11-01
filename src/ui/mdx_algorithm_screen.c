@@ -158,3 +158,9 @@ void MdxAlgorithmScreen_Handle(const void* input)
     /* keep the cursor on the selected algorithm in the list */
     MdxUi_MoveCursor(LIST_COL - 1, LIST_ROW0 + algo);
 }
+
+
+void MdxAlgorithmScreen_Init(void)
+{
+    MdxUi_RegisterScreen(SCREEN_ALGORITHM, MdxAlgorithmScreen_Enter, MdxAlgorithmScreen_Handle);
+}
