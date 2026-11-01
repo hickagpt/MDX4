@@ -115,6 +115,34 @@ void MdxUi_DrawText(u16 col, u16 row, const char* text)
 }
 
 
+void MdxUi_DrawNumber(u16 col, u16 row, u16 value, u8 width)
+{
+    char buf[6];
+    u8   i;
+    u16  v = value;
+
+    buf[5] = '\0';
+    for (i = 0; i < 5; i++)
+    {
+        buf[4 - i] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+
+    {
+        u8 start = (width > 5) ? 0 : (5 - width);
+        u8 c = col;
+        u8 d;
+        for (d = start; d < 5; d++, c++)
+        {
+            char ch[2];
+            ch[0] = (d < (5 - width)) ? ' ' : buf[d];
+            ch[1] = '\0';
+            VDP_drawText(ch, c, row);
+        }
+    }
+}
+
+
 void MdxUi_ClearLine(u16 row)
 {
     VDP_clearTextLine(row);

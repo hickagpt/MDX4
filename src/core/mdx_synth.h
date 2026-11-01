@@ -42,6 +42,12 @@ void MdxSynth_SetFeedback(u8 fb);
 void MdxSynth_NoteOn(u8 note);
 void MdxSynth_NoteOff(void);
 
+/* Snapshot the current patch (clamped copy) for UI display. Read-only. */
+void MdxSynth_GetPatch(FMPatch* out);
+
+/* True if a note is currently sounding (for UI performance status). */
+bool MdxSynth_IsKeyOn(void);
+
 /* Set pitch from a frequency in Hz (converted to the nearest table note). */
 void MdxSynth_SetPitch(u16 frequency);
 

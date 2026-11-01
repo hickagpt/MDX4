@@ -151,6 +151,20 @@ void MdxSynth_NoteOff(void)
 }
 
 
+void MdxSynth_GetPatch(FMPatch* out)
+{
+    if (out == NULL) return;
+    *out = g_patch;
+    MdxPatch_Clamp(out);
+}
+
+
+bool MdxSynth_IsKeyOn(void)
+{
+    return g_keyOn;
+}
+
+
 void MdxSynth_SetPitch(u16 frequency)
 {
     /* Convert the frequency (Hz) to the nearest table note using a fixed-point

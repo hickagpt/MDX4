@@ -56,6 +56,7 @@ void MdxUi_SetPreviewNote(u8 note);
 
 /* --- Render helpers (tile coordinates: col 0..39, row 0..27). --- */
 void MdxUi_DrawText(u16 col, u16 row, const char* text);
+void MdxUi_DrawNumber(u16 col, u16 row, u16 value, u8 width); /* fixed-width, space-padded */
 void MdxUi_DrawBox(u16 col, u16 row, u16 w, u16 h);
 void MdxUi_ClearLine(u16 row);
 void MdxUi_MoveCursor(u16 col, u16 row);   /* sprite cursor to text cell */
