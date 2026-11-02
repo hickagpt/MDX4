@@ -5,26 +5,50 @@
  * applied live through MdxSynth_SetAlgorithm(); if a preview note is sounding the
  * engine retriggers so the new routing is audible. The routing diagram is rebuilt
  * from the topology data on every change.
+ *
+ * Rendering (BUILD WAVE 2): the screen lives inside the DX-7 x Mega Drive device
+ * shell (MdxGfx_DrawDeviceShell). The content area (PAGE_*) is split into two
+ * hardware "panels": a left ALGORITHM patch-bay channel selector (ALG 0..7) and
+ * a right routing PATCH PANEL - the topology-derived node/link diagram framed as
+ * a hardware module plate. The diagram still derives every node and link from the
+ * shared topology data; no per-algorithm routing is hardcoded.
  */
 
 #include "mdx_algorithm_screen.h"
 
 #include "mdx_ui.h"
-#include "mdx_gfx.h"          /* MdxGfx toolkit: PlotTile, PAL2 chrome, base tiles */
+#include "mdx_gfx.h"          /* MdxGfx toolkit: PAGE_*, DrawPanel, DrawReadout, DrawSelectedBox */
 #include "input/mdx_input.h"
 #include "core/mdx_synth.h"
 #include "core/mdx_algorithm.h"
 
 
-#define LIST_COL 1
-#define DIAG_COL 14
-#define LIST_ROW0 1          /* ALG 0 at row 1 */
+/* ---------------------------------------------------------------------------
+ * Page geometry. PAGE_* (PAGE_X=2, PAGE_Y=2, PAGE_W=36, PAGE_H=24) is the green
+ * panel content area inside the device shell. This screen lays out two panels:
+ *   - LEFT  : the ALGORITHM selector - a patch-bay channel list (ALG 0..7)
+ *   - RIGHT : the routing PATCH PANEL - the topology-derived node/link diagram
+ *             (carrier/modulator colour coding preserved), framed as a hardware
+ *             module plate inside the shell.
+ * ------------------------------------------------------------------------- */
+
+/* --- Left: ALGORITHM list panel (cols 2..14, rows 2..25) --- */
+#define LIST_PANEL_X 2
+#define LIST_PANEL_Y 2
+#define LIST_PANEL_W 13
+#define LIST_PANEL_H 24
+#define LIST_ENTRY0  5          /* ALG 0 at row 5; entries occupy rows 5..12 */
+
+/* --- Right: routing patch panel (cols 16..37, rows 2..25) --- */
+#define DIAG_PANEL_X 16
+#define DIAG_PANEL_Y 2
+#define DIAG_PANEL_W 22
+#define DIAG_PANEL_H 24
 
 /* ---------------------------------------------------------------------------
- * Graphical routing diagram layout (W2, SPEC 3.3 / 4.4).
+ * Graphical routing diagram layout (the PATCH PANEL, cols 16..37).
  *
- * The diagram sits to the right of the ALG 0-7 list (cols 14..38). Four
- * operator NODES (S1 top .. S4 bottom) are stacked vertically; modulation
+ * Four operator NODES (S1 top .. S4 bottom) are stacked vertically; modulation
  * LINKS run straight DOWN because of the topology invariant (every link has
  * source index < target index). The picture is derived purely from
  * MdxAlgorithm_GetTopology() - never hardcoded per algorithm.
@@ -36,18 +60,21 @@
  * Carriers are the audible outputs of the current algorithm, so they read
  * brighter than the dim modulator nodes.
  * ------------------------------------------------------------------------- */
-#define DIAG_FRAME_X 14
-#define DIAG_FRAME_Y 2
-#define DIAG_FRAME_W 16      /* encloses link lanes + nodes: cols 14..29 */
-#define DIAG_FRAME_H 25      /* rows 2..26 */
+#define NODE_W 7
+#define NODE_H 3
+#define NODE_LEFT 21           /* node columns 21..27 */
+#define NODE_TOP0 5
+#define NODE_STEP 4            /* S1..S4 tops: 5, 9, 13, 17 (3 tall, 1-row gap) */
+#define LANE_BASE 17           /* link from source j -> lane column 17+j (left of nodes) */
+#define LEGEND_COL 28          /* per-operator routing text, right of the panel interior */
+#define HEADER_COL 17          /* "ROUTING ALG n" header column */
+#define HEADER_ROW 3
 
-#define NODE_W 8
-#define NODE_H 5
-#define NODE_LEFT 21         /* node columns 21..28 */
-#define NODE_TOP0 3
-#define NODE_STEP 6          /* S1..S4 tops: 3, 9, 15, 21 (5-tall, 1-row gap) */
-#define LANE_BASE 15         /* link from source j -> lane column 15+j (left of nodes) */
-#define LEGEND_COL 30        /* per-operator routing text, right of the frame */
+/* FB readout plate (inside the routing panel, below the nodes). */
+#define FB_X 17
+#define FB_Y 21
+#define FB_W 9
+#define FB_H 3
 
 /* ---------------------------------------------------------------------------
  * Runtime-generated tiles (no assets). All indices >= 0x0130 so they never
@@ -66,6 +93,11 @@
 #define ALG_TILE_CARFILL 0x0133
 #define ALG_TILE_SELFILL 0x0134
 #define ALG_TILE_BLANK   0x0135
+
+/* Green panel fill (MdxGfx base tile, PAL2) - used to clear panel interiors so
+ * they read as the DX-Green faceplate rather than transparent black. */
+#define ALG_PANEL_FILL  TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, \
+                                       (MDXGFX_TILE_BASE + MDXGFX_TILE_FILL))
 
 
 /* Format one operator's routing line: "n T -> t1,t2" or "n C -> OUT". */
@@ -103,18 +135,23 @@ static void format_op_line(char* buf, u8 opIndex, const MdxAlgTopology* topo)
 }
 
 
+/* One ALG list entry: "ALG n" rendered in the LCD readout font. */
+static void draw_alg_entry(u8 i)
+{
+    char line[8];
+    line[0] = 'A'; line[1] = 'L'; line[2] = 'G'; line[3] = ' ';
+    line[4] = (char)('0' + i);
+    line[5] = '\0';
+    MdxGfx_DrawReadoutStr((u16)(LIST_PANEL_X + 1), (u16)(LIST_ENTRY0 + i), line);
+}
+
+
 static void draw_list(u8 cur)
 {
     u8 i;
     for (i = 0; i < 8; i++)
-    {
-        char line[8];
-        line[0] = 'A'; line[1] = 'L'; line[2] = 'G'; line[3] = ' ';
-        line[4] = (char)('0' + i);
-        line[5] = '\0';
-        MdxUi_DrawText(LIST_COL, LIST_ROW0 + i, line);
-        (void)cur;
-    }
+        draw_alg_entry(i);
+    (void)cur;
 }
 
 
@@ -214,7 +251,7 @@ static void alg_draw_nodes(const MdxAlgTopology* topo)
 }
 
 /* Modulation links: for each target i and source j (j < i) with bit j set,
- * draw a downward L-route in lane (15 + j) from node j to node i. The
+ * draw a downward L-route in lane (17 + j) from node j to node i. The
  * invariant guarantees j is always above i, so every link flows downward. */
 static void alg_draw_links(const MdxAlgTopology* topo)
 {
@@ -241,13 +278,23 @@ static void alg_draw_links(const MdxAlgTopology* topo)
     }
 }
 
-/* Selection highlight: bright bar on the current ALG entry of the list
- * (rows 1..7 are clear of other text; row 8 holds the instructions). */
+/* Selection highlight: a SELECTED-coloured (PAL2 idx 9) frame around the
+ * current ALG entry in the left panel. The previous frame is cleared back to
+ * the green panel fill and its entry redrawn before the new frame is drawn. */
+static u8 s_lastSel = 255;
+
 static void alg_draw_selection(u8 algo)
 {
-    VDP_fillTileMapRect(BG_A, ALG_CHR(ALG_TILE_BLANK),   8, 1, 6, 7);
-    if (algo < 7)
-        VDP_fillTileMapRect(BG_A, ALG_CHR(ALG_TILE_SELFILL), 8, (u16)(1 + algo), 5, 1);
+    if (s_lastSel < 8)
+    {
+        VDP_fillTileMapRect(BG_A, ALG_PANEL_FILL,
+            (u16)(LIST_PANEL_X + 1), (u16)(LIST_ENTRY0 + s_lastSel),
+            (u16)(LIST_PANEL_W - 2), 1);
+        draw_alg_entry(s_lastSel);
+    }
+    MdxGfx_DrawSelectedBox((u16)(LIST_PANEL_X + 1), (u16)(LIST_ENTRY0 + algo),
+                           (u16)(LIST_PANEL_W - 2), 1);
+    s_lastSel = algo;
 }
 
 static void draw_diagram(u8 algo)
@@ -257,12 +304,11 @@ static void draw_diagram(u8 algo)
     u8 i;
     FMPatch p;
 
-    /* clear only the changed region: frame + legend */
-    VDP_fillTileMapRect(BG_A, ALG_CHR(ALG_TILE_BLANK), DIAG_FRAME_X,   DIAG_FRAME_Y, DIAG_FRAME_W, DIAG_FRAME_H);
-    VDP_fillTileMapRect(BG_A, ALG_CHR(ALG_TILE_BLANK), LEGEND_COL,     DIAG_FRAME_Y, (u16)(40 - LEGEND_COL), DIAG_FRAME_H);
-
-    /* outer frame marks the active-algorithm view (bright border, black interior) */
-    alg_draw_box(DIAG_FRAME_X, DIAG_FRAME_Y, DIAG_FRAME_W, DIAG_FRAME_H, ALG_TILE_BLANK);
+    /* clear only the routing-panel interior (keep the DrawPanel border), refill
+     * it with the green faceplate so the patch panel reads as hardware, not void. */
+    VDP_fillTileMapRect(BG_A, ALG_PANEL_FILL,
+        (u16)(DIAG_PANEL_X + 1), (u16)(DIAG_PANEL_Y + 1),
+        (u16)(DIAG_PANEL_W - 2), (u16)(DIAG_PANEL_H - 2));
 
     /* nodes + links, derived purely from the topology */
     alg_draw_nodes(topo);
@@ -277,22 +323,22 @@ static void draw_diagram(u8 algo)
         hdr[q++] = ' ';
         hdr[q++] = (char)('0' + algo);
         hdr[q++] = '\0';
-        MdxUi_DrawText(DIAG_COL, 1, hdr);
+        MdxGfx_DrawReadoutStr(HEADER_COL, HEADER_ROW, hdr);
     }
 
-    /* per-operator routing legend (right of the frame) */
+    /* per-operator routing legend (right of the nodes) */
     for (i = 0; i < 4; i++)
     {
         format_op_line(line, i, topo);
         MdxUi_DrawText(LEGEND_COL, s_nodeTop[i], line);
     }
 
-    /* feedback (S1 self-feedback) */
+    /* feedback (S1 self-feedback) readout - LCD plate with green-LCD text */
     MdxSynth_GetPatch(&p);
-    MdxUi_ClearLine(27);
-    MdxUi_DrawText(DIAG_COL, 27, "FB:");
-    MdxUi_DrawNumber(DIAG_COL + 4, 27, p.feedback, 1);
-    if (p.feedback > 0) MdxUi_DrawText(DIAG_COL + 6, 27, "S1");
+    MdxGfx_DrawReadout(FB_X, FB_Y, FB_W, FB_H);
+    MdxGfx_DrawReadoutStr((u16)(FB_X + 1), (u16)(FB_Y + 1), "FB");
+    MdxGfx_DrawReadoutNum((u16)(FB_X + 3), (u16)(FB_Y + 1), p.feedback, 1);
+    if (p.feedback > 0) MdxGfx_DrawReadoutStr((u16)(FB_X + 5), (u16)(FB_Y + 1), "S1");
 }
 
 
@@ -304,17 +350,27 @@ void MdxAlgorithmScreen_Enter(void)
     MdxGfx_Init();          /* generate chrome palette + base tiles (idempotent) */
     alg_gen_tiles();        /* generate the diagram's procedural tiles (once) */
 
-    MdxUi_ClearLine(0);
-    MdxUi_DrawText(1, 0, "ALGORITHM SELECT");
+    MdxGfx_DrawDeviceShell();   /* device shell frame - after the clear, before content */
 
+    /* LEFT panel: ALGORITHM patch-bay channel selector */
+    MdxGfx_DrawPanel(LIST_PANEL_X, LIST_PANEL_Y, LIST_PANEL_W, LIST_PANEL_H);
+    MdxGfx_DrawReadoutStr((u16)(LIST_PANEL_X + 1), (u16)(LIST_PANEL_Y + 1), "ALGORITHM");
+
+    /* RIGHT panel: routing patch panel (hardware module plate) */
+    MdxGfx_DrawPanel(DIAG_PANEL_X, DIAG_PANEL_Y, DIAG_PANEL_W, DIAG_PANEL_H);
+
+    s_lastSel = 255;
     draw_list(p.algorithm);
     draw_diagram(p.algorithm);
     alg_draw_selection(p.algorithm);
 
-    MdxUi_ClearLine(8);
-    MdxUi_DrawText(1, 8, "U/D/L/R:SEL  B:BACK  C:PLAY");
+    /* control hints (left panel footer) */
+    MdxGfx_DrawReadoutStr((u16)(LIST_PANEL_X + 1), (u16)(LIST_PANEL_Y + LIST_PANEL_H - 4), "U/D/L/R");
+    MdxGfx_DrawReadoutStr((u16)(LIST_PANEL_X + 1), (u16)(LIST_PANEL_Y + LIST_PANEL_H - 3), "B:BACK");
+    MdxGfx_DrawReadoutStr((u16)(LIST_PANEL_X + 1), (u16)(LIST_PANEL_Y + LIST_PANEL_H - 2), "C:PLAY");
 
-    MdxUi_MoveCursor(LIST_COL - 1, LIST_ROW0 + p.algorithm);
+    /* keep the sprite cursor on the selected algorithm in the list */
+    MdxUi_MoveCursor((u16)(LIST_PANEL_X - 1), (u16)(LIST_ENTRY0 + p.algorithm));
 }
 
 
@@ -347,7 +403,7 @@ void MdxAlgorithmScreen_Handle(const void* input)
     }
 
     /* keep the cursor on the selected algorithm in the list */
-    MdxUi_MoveCursor(LIST_COL - 1, LIST_ROW0 + algo);
+    MdxUi_MoveCursor((u16)(LIST_PANEL_X - 1), (u16)(LIST_ENTRY0 + algo));
 }
 
 

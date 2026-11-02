@@ -12,6 +12,12 @@
  * usable. Invalid data is rejected by the format layer before any field is
  * trusted (see mdx_patch_format.c).
  *
+ * Build Wave 2 (T18): the screen now renders on the DX-7 x Mega Drive device
+ * shell (MdxGfx_DrawDeviceShell) inside PAGE_* with the 16-slot list, a
+ * readout-backed status line, and an inline name editor. All storage, the
+ * navigate/edit state machine, the charset cycling, and C/A/B semantics are
+ * byte-for-byte preserved.
+ *
  * Controls:
  *   Navigate mode : Up/Down select slot, A edit name, C load, B back.
  *   Edit mode     : Left/Right move char cursor, Up/Down cycle char,
@@ -21,6 +27,7 @@
 #include "mdx_patch_screen.h"
 
 #include "mdx_ui.h"
+#include "mdx_gfx.h"           /* MdxGfx toolkit: shell, panel, readout, selected box */
 #include "input/mdx_input.h"
 #include "core/mdx_synth.h"
 #include "core/mdx_patch.h"
@@ -39,12 +46,33 @@
 #define NAME_LEN       16
 #define NAME_EDIT_MAX  15
 
-/* Layout. */
-#define LIST_COL   1
-#define NAME_COL   4   /* name starts after "NN " (3 chars) */
-#define LIST_ROW0  3   /* first slot on row 3 */
-#define STATUS_ROW 1
-#define HINT_ROW   26
+/* Layout (inside PAGE_* = cols 2..37, rows 2..25). The device shell owns the
+ * 2-tile bezel; all content lives on the DX-Green panel face. */
+#define HEADER_X    2
+#define HEADER_Y    2
+#define HEADER_W    36
+#define HEADER_H    2           /* rows 2..3 */
+
+#define SLOT_PANEL_X    2
+#define SLOT_PANEL_Y    4
+#define SLOT_PANEL_W    36
+#define SLOT_PANEL_H    18      /* rows 4..21; interior rows 5..20 (16 slots) */
+#define SLOT_ROW0       5       /* first slot line (interior top) */
+#define SLOT_COL        3       /* slot-line text column (overwrites sel box) */
+#define SLOT_LINE_W     19      /* "NN NAME" width; == sel-box width (clears it) */
+
+#define STATUS_X    2
+#define STATUS_Y    22
+#define STATUS_W    36
+#define STATUS_H    3           /* rows 22..24; interior row 23 (filled LCD) */
+#define STATUS_IN_X 3
+#define STATUS_IN_Y 23
+
+#define NAME_COL    STATUS_IN_X /* name-editor cursor base column */
+#define NAMEEDIT_Y  STATUS_IN_Y /* status-region row during edit */
+
+#define HINT_X  3
+#define HINT_Y  25              /* bottom row of PAGE_* */
 
 
 /* Character set used by the inline name editor (index 0 = space). */
@@ -84,7 +112,7 @@ static void ensure_name_terminated(FMPatch* p)
 }
 
 
-/* Draw one slot line: "NN NAME" (or "NN ----" when the slot is empty). */
+/* Draw one slot line on the panel: "NN NAME" (or "NN ----" when empty). */
 static void draw_slot(u8 idx)
 {
     char line[NAME_LEN + 4];
@@ -110,11 +138,13 @@ static void draw_slot(u8 idx)
     }
     line[p] = '\0';
 
-    MdxUi_DrawText(LIST_COL, LIST_ROW0 + idx, line);
+    MdxUi_DrawText(SLOT_COL, (u16)(SLOT_ROW0 + idx), line);
 }
 
 
-/* Draw the slot-number + status string at STATUS_ROW. */
+/* Draw the status readout (recessed green-LCD plate) with the slot number /
+ * status string. The readout plate is redrawn first so the previous face is
+ * cleared (no MdxUi_ClearLine inside the panel - it would punch a hole). */
 static void draw_status(void)
 {
     char num[3];
@@ -123,32 +153,60 @@ static void draw_status(void)
     num[1] = (char)('0' + (s_sel % 10));
     num[2] = '\0';
 
-    MdxUi_ClearLine(STATUS_ROW);
+    MdxGfx_DrawReadout(STATUS_X, STATUS_Y, STATUS_W, STATUS_H);
 
     if (!MdxStorage_IsAvailable())
     {
-        MdxUi_DrawText(LIST_COL, STATUS_ROW, "SAVE/LOAD UNAVAILABLE");
+        MdxGfx_DrawReadoutStr(STATUS_IN_X, STATUS_IN_Y, "SAVE/LOAD UNAVAILABLE");
         return;
     }
 
     switch (s_status)
     {
-        case 1:  /* saved */    MdxUi_DrawText(LIST_COL, STATUS_ROW, "SAVED SLOT "); MdxUi_DrawText(LIST_COL + 11, STATUS_ROW, num); break;
-        case 2:  /* loaded */   MdxUi_DrawText(LIST_COL, STATUS_ROW, "LOADED SLOT "); MdxUi_DrawText(LIST_COL + 12, STATUS_ROW, num); break;
-        case 4:  /* empty */    MdxUi_DrawText(LIST_COL, STATUS_ROW, "SLOT "); MdxUi_DrawText(LIST_COL + 5, STATUS_ROW, num); MdxUi_DrawText(LIST_COL + 7, STATUS_ROW, " EMPTY"); break;
-        case 5:  /* defaults */ MdxUi_DrawText(LIST_COL, STATUS_ROW, "DEFAULTS LOADED"); break;
-        default: MdxUi_DrawText(LIST_COL, STATUS_ROW, "A:EDIT  C:LOAD  B:BACK"); break;
+        case 1:  /* saved */    MdxGfx_DrawReadoutStr(STATUS_IN_X, STATUS_IN_Y, "SAVED SLOT "); MdxGfx_DrawReadoutStr(STATUS_IN_X + 11, STATUS_IN_Y, num); break;
+        case 2:  /* loaded */   MdxGfx_DrawReadoutStr(STATUS_IN_X, STATUS_IN_Y, "LOADED SLOT "); MdxGfx_DrawReadoutStr(STATUS_IN_X + 12, STATUS_IN_Y, num); break;
+        case 4:  /* empty */    MdxGfx_DrawReadoutStr(STATUS_IN_X, STATUS_IN_Y, "SLOT "); MdxGfx_DrawReadoutStr(STATUS_IN_X + 5, STATUS_IN_Y, num); MdxGfx_DrawReadoutStr(STATUS_IN_X + 7, STATUS_IN_Y, " EMPTY"); break;
+        case 5:  /* defaults */ MdxGfx_DrawReadoutStr(STATUS_IN_X, STATUS_IN_Y, "DEFAULTS LOADED"); break;
+        default: MdxGfx_DrawReadoutStr(STATUS_IN_X, STATUS_IN_Y, "A:EDIT C:LOAD B:BACK"); break;
     }
 }
 
 
+/* Inline name editor: render the (live, in-place edited) slot name in the
+ * status-region readout. The charset-cycling logic mutates s_slots[s_sel].name
+ * directly, so this just reflects it. */
+static void draw_name_editor(void)
+{
+    char buf[NAME_LEN + 1];
+    u8 i;
+
+    for (i = 0; i < NAME_LEN; i++)
+    {
+        char c = s_slots[s_sel].name[i];
+        buf[i] = (c == '\0') ? ' ' : c;
+    }
+    buf[NAME_EDIT_MAX] = '\0';   /* index 15 is the forced NUL already */
+
+    MdxGfx_DrawReadout(STATUS_X, STATUS_Y, STATUS_W, STATUS_H);
+    MdxGfx_DrawReadoutStr(NAME_COL, NAMEEDIT_Y, buf);
+}
+
+
+/* Hint strip at the bottom of PAGE_*. Both strings are the same length so a
+ * redraw fully overwrites the previous face (no ClearLine in the panel). */
 static void draw_hint(void)
 {
-    MdxUi_ClearLine(HINT_ROW);
     if (s_edit)
-        MdxUi_DrawText(LIST_COL, HINT_ROW, "U/D:CHG L/R:MOVE A:SAVE B:CANCEL");
+        MdxUi_DrawText(HINT_X, HINT_Y, "U/D:CHG L/R:MOVE A:SAVE B:CANCEL");
     else
-        MdxUi_DrawText(LIST_COL, HINT_ROW, "U/D:SEL A:EDIT C:LOAD B:BACK");
+        MdxUi_DrawText(HINT_X, HINT_Y, "U/D:SEL A:EDIT C:LOAD B:BACK    ");
+}
+
+
+/* IS-4 selection highlight: frame the active slot entry (PAL2 SELECTED). */
+static void draw_selection(void)
+{
+    MdxGfx_DrawSelectedBox(SLOT_COL, (u16)(SLOT_ROW0 + s_sel), SLOT_LINE_W, 1);
 }
 
 
@@ -189,14 +247,24 @@ void MdxPatchScreen_Enter(void)
     s_edit = 0;
     s_charPos = 0;
 
-    MdxUi_ClearLine(0);
-    MdxUi_DrawText(1, 0, "PATCH MANAGER");
+    /* Skin canvas + device shell, then content inside PAGE_*. */
+    MdxUi_ClearScreen();
+    MdxGfx_Init();                  /* chrome palette + base/widget tiles (guarded) */
+    MdxGfx_DrawDeviceShell();       /* DX-7 x MD frame; content laid out in PAGE_* */
+
+    /* Header plate (skin plate + PAL0 text on top). */
+    MdxGfx_DrawPanel(HEADER_X, HEADER_Y, HEADER_W, HEADER_H);
+    MdxUi_DrawText((u16)(HEADER_X + 1), HEADER_Y, "PATCH MANAGER");
+
+    /* Slot list panel + 16 slot lines inside PAGE_*. */
+    MdxGfx_DrawPanel(SLOT_PANEL_X, SLOT_PANEL_Y, SLOT_PANEL_W, SLOT_PANEL_H);
+    draw_all_slots();
+    draw_selection();
 
     draw_status();
-    draw_all_slots();
     draw_hint();
 
-    MdxUi_MoveCursor(0, LIST_ROW0 + s_sel);
+    MdxUi_MoveCursor(0, (u16)(SLOT_ROW0 + s_sel));
 }
 
 
@@ -214,7 +282,8 @@ void MdxPatchScreen_Handle(const void* input)
             s_edit = 0;
             draw_hint();
             draw_slot(s_sel);
-            MdxUi_MoveCursor(0, LIST_ROW0 + s_sel);
+            draw_selection();
+            MdxUi_MoveCursor(0, (u16)(SLOT_ROW0 + s_sel));
             return;
         }
 
@@ -250,9 +319,10 @@ void MdxPatchScreen_Handle(const void* input)
 
             s_edit = 0;
             draw_slot(s_sel);
+            draw_selection();
             draw_status();
             draw_hint();
-            MdxUi_MoveCursor(0, LIST_ROW0 + s_sel);
+            MdxUi_MoveCursor(0, (u16)(SLOT_ROW0 + s_sel));
             return;
         }
 
@@ -270,8 +340,9 @@ void MdxPatchScreen_Handle(const void* input)
             draw_slot(s_sel);
         }
 
-        /* keep the cursor on the editing cell */
-        MdxUi_MoveCursor((u16)(NAME_COL + s_charPos), LIST_ROW0 + s_sel);
+        /* refresh the inline name-editor face and keep the cursor on the cell */
+        draw_name_editor();
+        MdxUi_MoveCursor((u16)(NAME_COL + s_charPos), NAMEEDIT_Y);
         return;
     }
 
@@ -281,17 +352,19 @@ void MdxPatchScreen_Handle(const void* input)
     if (i->up)
     {
         if (s_sel > 0) s_sel--;
-        draw_slot(s_sel + 1);
+        draw_slot((u8)(s_sel + 1));
         draw_slot(s_sel);
-        MdxUi_MoveCursor(0, LIST_ROW0 + s_sel);
+        draw_selection();
+        MdxUi_MoveCursor(0, (u16)(SLOT_ROW0 + s_sel));
         return;
     }
     if (i->down)
     {
         if (s_sel < MDX4_PATCH_SLOTS - 1) s_sel++;
-        draw_slot(s_sel - 1);
+        draw_slot((u8)(s_sel - 1));
         draw_slot(s_sel);
-        MdxUi_MoveCursor(0, LIST_ROW0 + s_sel);
+        draw_selection();
+        MdxUi_MoveCursor(0, (u16)(SLOT_ROW0 + s_sel));
         return;
     }
 
@@ -300,7 +373,8 @@ void MdxPatchScreen_Handle(const void* input)
         s_edit = 1;
         s_charPos = 0;
         draw_hint();
-        MdxUi_MoveCursor((u16)(NAME_COL + s_charPos), LIST_ROW0 + s_sel);
+        draw_name_editor();
+        MdxUi_MoveCursor((u16)(NAME_COL + s_charPos), NAMEEDIT_Y);
         return;
     }
 

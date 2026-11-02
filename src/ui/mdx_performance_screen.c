@@ -40,14 +40,25 @@
 /* Pitch bend range (semitones, signed) - a few semitones up/down and back. */
 #define BEND_MAX        12
 
-/* Edit-overlay rows. */
-#define ROW_HEADER      0
-#define ROW_NOTE        2
-#define PANEL_ROW0      5        /* BEND / FB / LFRQ / LDEP                 */
+/* Note readout LCD window (inside PAGE_*): recessed green-LCD plate. */
+#define NOTE_RD_X       2
+#define NOTE_RD_Y       2
+#define NOTE_RD_W       14
+#define NOTE_RD_H       4
+
+/* EDIT overlay panel (inside the device-shell PAGE_*). The plate is a bordered
+ * MdxGfx_DrawPanel; rows 7..10 hold BEND/FB/LFRQ/LDEP, row 11 the help line.
+ * Row 0 is reserved for the shell's "MDX-4" branding and is never touched. */
+#define EDIT_PANEL_X    2
+#define EDIT_PANEL_Y    6        /* top border row of the plate           */
+#define EDIT_PANEL_W    36
+#define EDIT_PANEL_H    7        /* rows 6..12, interior rows 7..11       */
+#define PANEL_ROW0      7        /* first BEND row (panel interior)       */
 #define PANEL_COUNT     4
-#define ROW_EDITHELP    10
+#define ROW_EDITHELP    11
 #define ROW_HELP        20
-#define VAL_COL         9
+#define LABEL_COL       3
+#define VAL_COL         22
 
 enum { MOD_BEND = 0, MOD_FB, MOD_LFRQ, MOD_LDEP };
 
@@ -121,31 +132,19 @@ static void draw_note_readout(void)
 {
     const u8  pc   = s_selNote % 12;
     const u8  oct  = (u8)(s_selNote / 12 - 1);
-    /* Worst case "NOTE C# 6  84" is 13 chars + NUL = 14; size 16 to be safe. */
-    char      buf[16];
     const char* nm = s_noteName[pc];
-    char*     p = buf;
-    const char* s;
-    u16       n = s_selNote;
-    u8        d0, d1, d2;
+    char      tag[4];
+    u8        t = 0;
 
-    s = "NOTE ";
-    while (*s) *p++ = *s++;
-    *p++ = nm[0];
-    if (nm[1] == '#') *p++ = '#';
-    *p++ = (char)('0' + oct);
-    *p++ = ' ';
-    *p++ = ' ';
-    d0 = (char)('0' + (n % 10));
-    d1 = (char)('0' + ((n / 10) % 10));
-    d2 = (char)('0' + (n / 100));
-    *p++ = (n >= 100) ? d2 : ' ';
-    *p++ = (n >= 10)  ? d1 : ' ';
-    *p++ = d0;
-    *p = '\0';
+    /* The LCD readout font (A-Z, 0-9, - _ . : /) has no '#' glyph, so the
+     * sharp is dropped from the label; the MIDI number disambiguates pitch. */
+    tag[t++] = nm[0];
+    tag[t++] = (char)('0' + oct);
+    tag[t]   = '\0';                 /* e.g. "C4", "E4", "C6"            */
 
-    MdxUi_ClearLine(ROW_NOTE);
-    MdxUi_DrawText(1, ROW_NOTE, buf);
+    MdxGfx_DrawReadout(NOTE_RD_X, NOTE_RD_Y, NOTE_RD_W, NOTE_RD_H);
+    MdxGfx_DrawReadoutStr(NOTE_RD_X + 1, NOTE_RD_Y + 1, tag);
+    MdxGfx_DrawReadoutNum(NOTE_RD_X + 6, NOTE_RD_Y + 1, (u16)s_selNote, 3);
 }
 
 static void draw_keyboard(void)
@@ -168,9 +167,10 @@ static void draw_keyboard(void)
 
 static void draw_header(void)
 {
-    MdxUi_ClearLine(ROW_HEADER);
-    MdxUi_DrawText(1, ROW_HEADER, "PERFORMANCE");
-    MdxUi_DrawText(16, ROW_HEADER, (s_mode == MODE_EDIT) ? "EDIT" : "PLAY");
+    /* Row 0 carries the shell's "MDX-4" branding - never clear it. The title and
+     * mode indicator sit on the green panel, to the right of the note readout. */
+    MdxUi_DrawText(18, 2, "PERFORMANCE");
+    MdxUi_DrawText(31, 2, (s_mode == MODE_EDIT) ? "EDIT" : "PLAY");
 }
 
 static u8 get_mod_val(u8 idx)
@@ -184,13 +184,14 @@ static u8 get_mod_val(u8 idx)
     }
 }
 
-/* Draw one edit-panel row (name + value). Bend shows a signed value. */
+/* Draw one edit-panel row (name + value). Bend shows a signed value. The label
+ * is PAL0 text; the value is the green-LCD readout font, both painted on top of
+ * the panel plate - no line clear (ClearLine would punch a hole in the panel). */
 static void draw_panel_row(u8 idx)
 {
     const u16 row = (u16)(PANEL_ROW0 + idx);
 
-    MdxUi_ClearLine(row);
-    MdxUi_DrawText(1, row, s_modName[idx]);
+    MdxUi_DrawText(LABEL_COL, row, s_modName[idx]);
 
     if (idx == MOD_BEND)
     {
@@ -205,11 +206,11 @@ static void draw_panel_row(u8 idx)
         vbuf[2] = (char)('0' + (b / 10));
         vbuf[1] = ' ';
         *p = '\0';
-        MdxUi_DrawText(VAL_COL, row, vbuf);
+        MdxGfx_DrawReadoutStr(VAL_COL, row, vbuf);
     }
     else
     {
-        MdxUi_DrawNumber(VAL_COL, row, get_mod_val(idx), 3);
+        MdxGfx_DrawReadoutNum(VAL_COL, row, get_mod_val(idx), 3);
     }
 }
 
@@ -219,13 +220,20 @@ static void draw_panel_all(void)
     for (i = 0; i < PANEL_COUNT; i++) draw_panel_row(i);
 }
 
+/* Draw the bordered plate that surrounds the edit overlay's rows + help line. */
+static void draw_edit_panel_plate(void)
+{
+    MdxGfx_DrawPanel(EDIT_PANEL_X, EDIT_PANEL_Y, EDIT_PANEL_W, EDIT_PANEL_H);
+}
+
+/* Returning to PLAY: restore the clean green panel over the edit-overlay region.
+ * Do NOT use MdxUi_ClearLine here - it would punch a black hole through the
+ * shell's green panel. Refilling with the panel-fill tile matches the shell. */
 static void clear_panel(void)
 {
-    MdxUi_ClearLine(PANEL_ROW0);
-    MdxUi_ClearLine(PANEL_ROW0 + 1);
-    MdxUi_ClearLine(PANEL_ROW0 + 2);
-    MdxUi_ClearLine(PANEL_ROW0 + 3);
-    MdxUi_ClearLine(ROW_EDITHELP);
+    VDP_fillTileMapRect(BG_A,
+                        TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, MDXGFX_TILE_FILL),
+                        EDIT_PANEL_X, EDIT_PANEL_Y, EDIT_PANEL_W, EDIT_PANEL_H);
 }
 
 
@@ -238,10 +246,10 @@ static void enter_edit(void)
     MdxSynth_GetPatch(&s_patch);
 
     draw_header();
+    draw_edit_panel_plate();
     draw_panel_all();
 
-    MdxUi_ClearLine(ROW_EDITHELP);
-    MdxUi_DrawText(1, ROW_EDITHELP, "U/D:SEL L/R:VAL A/B:PLAYMODE C:PLAY");
+    MdxUi_DrawText(LABEL_COL, ROW_EDITHELP, "U/D:SEL L/R:VAL A/B:PLAYMODE C:PLAY");
     MdxUi_MoveCursor(1, (u16)(PANEL_ROW0 + s_modSel));
 }
 
@@ -272,6 +280,9 @@ void MdxPerformanceScreen_Enter(void)
     s_mode     = MODE_PLAY;
 
     MdxSynth_GetPatch(&s_patch);
+
+    MdxUi_ClearScreen();
+    MdxGfx_DrawDeviceShell();
 
     draw_header();
     draw_note_readout();
