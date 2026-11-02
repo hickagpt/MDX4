@@ -30,11 +30,22 @@
 #define CURSOR_PAL        1
 #define CURSOR_COLOR_GIDX (CURSOR_PAL * 16 + 1)   /* 17 */
 
+/* Blank wipe tile: VRAM index well clear of every documented range. */
+#define BLANK_TILE_INDEX  0x0110   /* between cursor (0x0100) and MdxGfx base (0x0120) */
+
 /* Solid 8x8 tile, every pixel = colour value 1 (rendered with CURSOR_PAL). */
 static const u32 g_cursorTile[8] =
 {
     0x11111111, 0x11111111, 0x11111111, 0x11111111,
     0x11111111, 0x11111111, 0x11111111, 0x11111111
+};
+
+/* Blank 8x8 tile, every pixel = colour 0 (background). Used to wipe BG_A on
+ * screen entry so each Enter() draws onto a clean canvas. */
+static const u32 g_blankTile[8] =
+{
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000
 };
 
 /* ----- State. ----- */
@@ -70,6 +81,8 @@ void MdxUi_SetScreen(MdxScreen s)
     if (s == g_screen) return;          /* no-op if already there */
 
     g_screen = s;
+
+    MdxUi_ClearScreen();   /* wipe old screen's text + graphics before repaint */
 
     if (g_enter[g_screen]) g_enter[g_screen]();   /* render once on entry */
 }
@@ -181,6 +194,17 @@ void MdxUi_DrawBox(u16 col, u16 row, u16 w, u16 h)
 }
 
 
+void MdxUi_ClearScreen(void)
+{
+    /* Wipe the entire BG_A plane with the blank background tile. Only the
+     * tilemap is cleared; VRAM tile definitions (font, cursor, MdxGfx) stay
+     * intact, and the sprite cursor lives on a separate layer. */
+    VDP_fillTileMapRect(BG_A,
+                        TILE_ATTR_FULL(0, 0, FALSE, FALSE, BLANK_TILE_INDEX),
+                        0, 0, MDX_UI_COLS, MDX_UI_ROWS);
+}
+
+
 void MdxUi_MoveCursor(u16 col, u16 row)
 {
     if ((col == g_cursorCol) && (row == g_cursorRow)) return;   /* unchanged */
@@ -211,6 +235,9 @@ void MdxUi_Init(void)
     /* Load a solid cursor tile into VRAM (index 256, well clear of the font). */
     VDP_loadTileData(g_cursorTile, CURSOR_TILE_INDEX, 1, DMA);
 
+    /* Load the blank wipe tile into VRAM (index 0x0110, clear of all ranges). */
+    VDP_loadTileData(g_blankTile, BLANK_TILE_INDEX, 1, DMA);
+
     /* Sprite cursor (low-level VDP sprite API, no SpriteDefinition needed). */
     VDP_resetSprites();
     g_cursorSpr = VDP_allocateSprites(1);
@@ -238,6 +265,7 @@ void MdxUi_Run(void)
     u8       prevCHeld = 0;
 
     /* First paint of the starting screen. */
+    MdxUi_ClearScreen();   /* defensive: guarantee a clean boot canvas */
     if (g_enter[g_screen]) g_enter[g_screen]();
 
     while (TRUE)
