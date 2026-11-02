@@ -95,11 +95,11 @@ static void set_val(u8 idx, u8 v)
 
 /* ADSR-style approximation: amp 0..(innerH-1), time across the 128px-wide
  * interior. Rendered as a pixel-plotted curve in procedurally generated tiles
- * (W3): a 1px MdxGfx border frame + an interior filled with graph tiles.
- * The curve is derived each redraw from s_op (the live operator copy). */
+ * (W3). The recessed LCD window drawn by MdxGfx_DrawReadout(BOX_*) in Enter is
+ * the frame; this routine fills the interior (IX0..IX0+IW, IY0..IY0+IH) with
+ * graph tiles. The curve is derived each redraw from s_op (the live operator copy). */
 static void draw_graph(void)
 {
-    u8  r;
     u8  attackW, decayW, sustainW, releaseW;
     u16 totalUnits;
     u16 attPx, decPx, susPx, relPx;   /* each stage's width in interior px  */
@@ -108,37 +108,6 @@ static void draw_graph(void)
     const u16 innerH = (u16)IH * 8;   /* 48 px   */
     u16 x;
     u16 i;
-
-    /* clear + redraw the box (no overlap with the param list rows) */
-    for (r = BOX_Y; r < (BOX_Y + BOX_H); r++) VDP_clearTextLine(r);
-
-    /* 1px border frame using the MdxGfx border tiles. */
-    {
-        const u16 b  = MDXGFX_TILE_BASE;
-        const u16 tl = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_TL));
-        const u16 tr = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_TR));
-        const u16 bl = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_BL));
-        const u16 br = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_BR));
-        const u16 t  = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_T));
-        const u16 bt = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_B));
-        const u16 l  = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_L));
-        const u16 rt = TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (u16)(b + MDXGFX_TILE_BORDER_R));
-
-        VDP_setTileMapXY(BG_A, tl, BOX_X, BOX_Y);
-        VDP_setTileMapXY(BG_A, tr, (u16)(BOX_X + BOX_W - 1), BOX_Y);
-        VDP_setTileMapXY(BG_A, bl, BOX_X, (u16)(BOX_Y + BOX_H - 1));
-        VDP_setTileMapXY(BG_A, br, (u16)(BOX_X + BOX_W - 1), (u16)(BOX_Y + BOX_H - 1));
-        if (BOX_W > 2)
-        {
-            VDP_fillTileMapRect(BG_A, t,  (u16)(BOX_X + 1), BOX_Y,         (u16)(BOX_W - 2), 1);
-            VDP_fillTileMapRect(BG_A, bt, (u16)(BOX_X + 1), (u16)(BOX_Y + BOX_H - 1), (u16)(BOX_W - 2), 1);
-        }
-        if (BOX_H > 2)
-        {
-            VDP_fillTileMapRect(BG_A, l,  BOX_X, (u16)(BOX_Y + 1),     1, (u16)(BOX_H - 2));
-            VDP_fillTileMapRect(BG_A, rt, (u16)(BOX_X + BOX_W - 1), (u16)(BOX_Y + 1), 1, (u16)(BOX_H - 2));
-        }
-    }
 
     /* Stage widths in 'units' (the existing approximation math). decay2Rate now
      * drives sustainW, mirroring how decay1Rate drives decayW (was fixed 3). */
@@ -222,19 +191,38 @@ static void draw_graph(void)
 }
 
 
-static void draw_param(u8 idx)
+/* Plate geometry: a single column of six recessed green-LCD readout plates
+ * (MdxGfx_DrawReadout) to the LEFT of the graph window, inside PAGE_*. The
+ * selected plate is framed by MdxGfx_DrawSelectedBox (IS-4). T14 renders the
+ * ADSR curve into the LCD window established at BOX_X/BOX_Y/BOX_W/BOX_H. */
+#define PLATE_X    2
+#define PLATE_W    14
+#define PLATE_H    3
+#define PLATE_Y0   4           /* first plate top row (in PAGE_*)          */
+#define PLATE_STEP 3           /* rows between plate tops                  */
+#define plate_row(i)  ((u16)(PLATE_Y0 + (u16)(i) * PLATE_STEP))
+
+/* One skin plate: a recessed LCD readout showing the param name + value. */
+static void draw_plate(u8 idx)
 {
-    const u16 row = (u16)(ROW0 + idx);
-    MdxUi_ClearLine(row);
-    MdxUi_DrawText(1, row, s_param[idx].name);
-    MdxUi_DrawNumber(8, row, get_val(idx), 3);
+    const u16 x = PLATE_X;
+    const u16 y = plate_row(idx);
+
+    MdxGfx_DrawReadout(x, y, PLATE_W, PLATE_H);
+    MdxGfx_DrawReadoutStr((u16)(x + 1), (u16)(y + 1), s_param[idx].name);
+    MdxGfx_DrawReadoutNum((u16)(x + 9), (u16)(y + 1), get_val(idx), 2);
 }
 
-
-static void draw_all_params(void)
+static void draw_all_plates(void)
 {
     u8 i;
-    for (i = 0; i < PARAM_COUNT; i++) draw_param(i);
+    for (i = 0; i < PARAM_COUNT; i++) draw_plate(i);
+}
+
+/* IS-4 selection highlight: frame the active param plate (PAL2 SELECTED). */
+static void draw_selection(void)
+{
+    MdxGfx_DrawSelectedBox(PLATE_X, plate_row(s_sel), PLATE_W, PLATE_H);
 }
 
 
@@ -243,13 +231,12 @@ static void draw_header(void)
     char buf[20];
     u8 op = MdxUi_GetOperator();
 
-    MdxUi_ClearLine(0);
-    MdxUi_DrawText(1, 0, "ENVELOPE EDIT");
+    MdxUi_DrawText(PLATE_X, 2, "ENVELOPE EDIT");
 
     buf[0] = 'O'; buf[1] = 'P'; buf[2] = ' ';
     buf[3] = (char)('1' + op);
     buf[4] = '\0';
-    MdxUi_DrawText(16, 0, buf);
+    MdxUi_DrawText(28, 2, buf);
 }
 
 
@@ -257,20 +244,26 @@ void MdxEnvelopeScreen_Enter(void)
 {
     FMPatch p;
 
-    MdxGfx_Init();          /* generate chrome palette + base tiles (idempotent) */
+    MdxGfx_Init();                  /* chrome palette + base tiles (idempotent) */
+    MdxUi_ClearScreen();
+    MdxGfx_DrawDeviceShell();       /* DX-7 x MD frame; content drawn in PAGE_* */
 
     MdxSynth_GetPatch(&p);
     s_op = p.operators[MdxUi_GetOperator()];
     s_sel = 0;
 
     draw_header();
-    draw_all_params();
-    draw_graph();
 
-    MdxUi_ClearLine(18);
-    MdxUi_DrawText(1, 18, "U/D:SEL A:OP B:BACK C:PLAY");
+    /* LCD window where T14 renders the ADSR curve (rect = BOX_*). */
+    MdxGfx_DrawReadout(BOX_X, BOX_Y, BOX_W, BOX_H);
 
-    MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel));
+    draw_graph();                   /* legacy curve (T14 reworks into the window) */
+    draw_all_plates();
+    draw_selection();
+
+    MdxUi_DrawText(2, 23, "U/D:SEL A:OP B:BACK C:PLAY");
+
+    MdxUi_MoveCursor(PLATE_X, (u16)(plate_row(s_sel) + 1));
 }
 
 
@@ -281,8 +274,19 @@ void MdxEnvelopeScreen_Handle(const void* input)
 
     if (i == NULL) return;
 
-    if (i->up)   { if (s_sel > 0)                    s_sel--; MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel)); }
-    if (i->down) { if (s_sel < (PARAM_COUNT - 1))    s_sel++; MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel)); }
+    if (i->up || i->down)
+    {
+        const u8 old = s_sel;
+        if (i->up)   { if (s_sel > 0)                  s_sel--; }
+        if (i->down) { if (s_sel < (PARAM_COUNT - 1))  s_sel++; }
+        if (s_sel != old)
+        {
+            draw_plate(old);          /* redraw old plate, dropping its highlight */
+            draw_plate(s_sel);        /* redraw new plate */
+            draw_selection();
+        }
+        MdxUi_MoveCursor(PLATE_X, (u16)(plate_row(s_sel) + 1));
+    }
 
     if (i->a)
     {
@@ -294,8 +298,9 @@ void MdxEnvelopeScreen_Handle(const void* input)
             s_op = p.operators[op];
         }
         draw_header();
-        draw_all_params();
         draw_graph();
+        draw_all_plates();
+        draw_selection();
         return;
     }
 
@@ -310,8 +315,9 @@ void MdxEnvelopeScreen_Handle(const void* input)
 
         set_val(s_sel, (u8)val);
         MdxSynth_SetOperator(MdxUi_GetOperator(), &s_op);   /* 0x50/60/70/80 */
-        draw_param(s_sel);
         draw_graph();
+        draw_all_plates();
+        draw_selection();
     }
 }
 

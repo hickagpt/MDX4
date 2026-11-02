@@ -3,6 +3,9 @@
  *
  * See mdx_modulation_screen.h. Feedback is a topology change (retrigger while a
  * note is held so it is audible); LFO changes are live (0x22 / 0xB4).
+ *
+ * Rendered through the MdxGfx toolkit (knobs / faders / LED / selected box)
+ * inside the device shell, matching the Operator screen's migrated look.
  */
 
 #include "mdx_modulation_screen.h"
@@ -11,10 +14,18 @@
 #include "input/mdx_input.h"
 #include "core/mdx_synth.h"
 #include "core/mdx_patch.h"
+#include "ui/mdx_gfx.h"    /* MdxGfx toolkit: Init, DrawKnob/Fader/LED, DrawSelectedBox, DrawDeviceShell, PAGE_* */
 
 
 #define ROW0       1
 #define PARAM_COUNT 5
+
+/* Content layout (tile coords, all inside PAGE_X/Y/W/H = 2/2/36/24). */
+#define LBL_ROW   5    /* parameter label plates        */
+#define CTL_ROW   8    /* control widgets               */
+#define LED_ROW   11   /* LFO on/off indicator          */
+#define VAL_ROW   15   /* numeric value plates          */
+#define HELP_ROW  23   /* footer help line             */
 
 
 typedef struct
@@ -53,40 +64,78 @@ static u8 get_val(u8 idx)
 }
 
 
-static void draw_param(u8 idx)
+/* Column centre for parameter idx (0..4): 5, 12, 19, 26, 33. */
+static u16 col_x(u8 idx)
 {
-    const u16 row = (u16)(ROW0 + idx);
-    MdxUi_ClearLine(row);
-    MdxUi_DrawText(1, row, s_param[idx].name);
-    MdxUi_DrawNumber(8, row, get_val(idx), 3);
+    return (u16)(5 + 7 * idx);
 }
 
 
-static void draw_all_params(void)
+/* Draw one parameter's label plate, control widget and numeric value. The
+ * selected control is framed by the unified MdxGfx_DrawSelectedBox (the widget
+ * draw helpers call it internally when 'selected' is set). */
+static void draw_param(u8 idx)
 {
-    u8 i;
-    for (i = 0; i < PARAM_COUNT; i++) draw_param(i);
+    const u16 cx = col_x(idx);
+    const u8  v  = get_val(idx);
+    const bool sel = (idx == s_sel);
+
+    /* label plate + name */
+    MdxGfx_DrawReadout((u16)(cx - 1), LBL_ROW, 4, 2);
+    MdxGfx_DrawReadoutStr(cx, LBL_ROW, s_param[idx].name);
+
+    /* control widget (knob or fader) */
+    switch (idx)
+    {
+        case 0:  /* FB  : rotary knob 0..7      */ MdxGfx_DrawKnob(cx, CTL_ROW, v, 7, sel); break;
+        case 1:  /* LFO : vertical fader 0..1   */ MdxGfx_DrawFaderV(cx, CTL_ROW, 2, v, 1, sel); break;
+        case 2:  /* FRQ : rotary knob 0..7      */ MdxGfx_DrawKnob(cx, CTL_ROW, v, 7, sel); break;
+        case 3:  /* PMS : vertical fader 0..7   */ MdxGfx_DrawFaderV(cx, CTL_ROW, 6, v, 7, sel); break;
+        case 4:  /* AMS : vertical fader 0..3   */ MdxGfx_DrawFaderV(cx, CTL_ROW, 4, v, 3, sel); break;
+        default: break;
+    }
+
+    /* numeric value plate (zero-padded) */
+    MdxGfx_DrawReadout((u16)(cx - 1), VAL_ROW, 4, 2);
+    MdxGfx_DrawReadoutNum(cx, VAL_ROW, v, 2);
+}
+
+
+/* LFO on/off indicator (red LED in the LFO column). */
+static void draw_led(void)
+{
+    MdxGfx_DrawLED(col_x(1), LED_ROW, MDXGFX_LEDCOLOR_RED,
+                   s_patch.lfoEnabled ? TRUE : FALSE);
 }
 
 
 static void draw_header(void)
 {
-    MdxUi_ClearLine(0);
-    MdxUi_DrawText(1, 0, "MODULATION  LFO:");
-    MdxUi_DrawText(15, 0, s_patch.lfoEnabled ? "ON " : "OFF");
+    /* LFO on/off is shown by the LED; refresh its state. */
+    draw_led();
 }
 
 
 void MdxModulationScreen_Enter(void)
 {
+    u8 i;
+
+    MdxGfx_Init();          /* generate PAL2/PAL3 + all widget tiles (this screen omitted it before) */
     MdxSynth_GetPatch(&s_patch);
     s_sel = 0;
 
-    draw_header();
-    draw_all_params();
+    MdxUi_ClearScreen();            /* wipe BG_A plane                 */
+    MdxGfx_DrawDeviceShell();       /* DX-7 shell; inner rect = PAGE_* */
 
-    MdxUi_ClearLine(7);
-    MdxUi_DrawText(1, 7, "U/D:SEL L/R:CHG B:BACK C:PLAY");
+    /* page title */
+    MdxGfx_DrawReadout(2, 2, 12, 2);
+    MdxGfx_DrawReadoutStr(4, 2, "MODULATION");
+
+    /* controls + LFO indicator */
+    for (i = 0; i < PARAM_COUNT; i++) draw_param(i);
+    draw_led();
+
+    MdxUi_DrawText(2, HELP_ROW, "U/D:SEL L/R:CHG B:BACK C:PLAY");
 
     MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel));
 }

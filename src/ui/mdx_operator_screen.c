@@ -13,30 +13,48 @@
 #include "ui/mdx_gfx.h"    /* MdxGfx toolkit: DrawHBar, PAL2 chrome, base tiles */
 
 
-#define ROW0      1          /* first parameter row */
+#define ROW0      1          /* (legacy) sprite-cursor base row for Handle */
 #define PARAM_COUNT 11
+
+/* Widget kind for each param tile in the grid. Cyclic / stepped params use a
+ * rotary Knob; level / rate params use a horizontal Fader. Selection highlight
+ * (MdxGfx_DrawSelectedBox) is drawn by the widget's own `selected` flag. */
+#define PKNOB   0
+#define PFADER  1
+
+#define HEADER_ROW  2        /* inside the device-shell green panel (PAGE_Y) */
+#define GRID_TOP    4        /* first param row in the panel                 */
+#define FOOTER_ROW  23       /* help line near panel bottom                  */
+#define LABEL_X     2        /* param-name text column                       */
+#define WIDGET_X    9        /* widget tile column                           */
+#define FADER_LEN   19       /* horizontal-fader span (cols 9..27)          */
+#define NUM_X       30       /* numeric readout column (3 digits)           */
 
 typedef struct
 {
     const char* name;
     u8 min;
     u8 max;
+    u8 kind;      /* PKNOB or PFADER */
 } ParamDef;
 
 
+/* Min / max and order are the original YM2612 ranges (do not re-range).
+ * kind: KNOB for cyclic/stepped params (MUL DET KS AM SSG),
+ *       FADER for level/rate params (TL AR D1R D1L D2R RR). */
 static const ParamDef s_param[PARAM_COUNT] =
 {
-    { "MUL", 0, 15  },   /* multiplier        */
-    { "DET", 0, 7   },   /* detune            */
-    { "TL",  0, 127 },   /* total level       */
-    { "KS",  0, 3   },   /* key scale         */
-    { "AR",  0, 31  },   /* attack rate       */
-    { "D1R", 0, 31  },   /* decay 1 rate      */
-    { "D1L", 0, 15  },   /* sustain level     */
-    { "D2R", 0, 31  },   /* decay 2 rate      */
-    { "RR",  0, 31  },   /* release rate      */
-    { "AM",  0, 1   },   /* amplitude mod     */
-    { "SSG", 0, 15  }    /* SSG-EG            */
+    { "MUL", 0, 15,  PKNOB  },   /* multiplier        */
+    { "DET", 0, 7,   PKNOB  },   /* detune            */
+    { "TL",  0, 127, PFADER },   /* total level       */
+    { "KS",  0, 3,   PKNOB  },   /* key scale         */
+    { "AR",  0, 31,  PFADER },   /* attack rate       */
+    { "D1R", 0, 31,  PFADER },   /* decay 1 rate      */
+    { "D1L", 0, 15,  PFADER },   /* sustain level     */
+    { "D2R", 0, 31,  PFADER },   /* decay 2 rate      */
+    { "RR",  0, 31,  PFADER },   /* release rate      */
+    { "AM",  0, 1,   PKNOB  },   /* amplitude mod     */
+    { "SSG", 0, 15,  PKNOB  }    /* SSG-EG            */
 };
 
 
@@ -86,12 +104,18 @@ static void set_val(u8 idx, u8 v)
 
 static void draw_param(u8 idx)
 {
-    const u16 row = (u16)(ROW0 + idx);
+    const u16 y   = (u16)(GRID_TOP + idx);
     const u8  v   = get_val(idx);
-    MdxUi_ClearLine(row);
-    MdxUi_DrawText(1, row, s_param[idx].name);
-    MdxGfx_DrawHBar(12, row, 16, v, s_param[idx].max);   /* graphical slider */
-    MdxUi_DrawNumber(30, row, v, 3);                     /* keep numeric readout */
+    const bool sel = (idx == s_sel);   /* selected param -> DrawSelectedBox highlight */
+
+    MdxUi_DrawText(LABEL_X, y, s_param[idx].name);
+
+    if (s_param[idx].kind == PKNOB)
+        MdxGfx_DrawKnob((u16)WIDGET_X, y, v, s_param[idx].max, sel);
+    else
+        MdxGfx_DrawFaderH((u16)WIDGET_X, y, FADER_LEN, v, s_param[idx].max, sel);
+
+    MdxUi_DrawNumber((u16)NUM_X, y, v, 3);   /* numeric readout beside the widget */
 }
 
 
@@ -107,13 +131,12 @@ static void draw_header(void)
     char buf[20];
     u8 op = MdxUi_GetOperator();
 
-    MdxUi_ClearLine(0);
-    MdxUi_DrawText(1, 0, "OPERATOR EDIT");
+    MdxUi_DrawText(2, HEADER_ROW, "OPERATOR EDIT");
 
     buf[0] = 'O'; buf[1] = 'P'; buf[2] = ' ';
     buf[3] = (char)('1' + op);
     buf[4] = '\0';
-    MdxUi_DrawText(16, 0, buf);
+    MdxUi_DrawText(20, HEADER_ROW, buf);
 }
 
 
@@ -125,11 +148,13 @@ void MdxOperatorScreen_Enter(void)
     s_op = p.operators[MdxUi_GetOperator()];
     s_sel = 0;
 
+    MdxUi_ClearScreen();
+    MdxGfx_DrawDeviceShell();   /* DX-7 shell on BG_A, content inside PAGE_* */
+
     draw_header();
     draw_all_params();
 
-    MdxUi_ClearLine(13);
-    MdxUi_DrawText(1, 13, "U/D:SEL A:OP B:BACK C:PLAY");
+    MdxUi_DrawText(2, FOOTER_ROW, "U/D:SEL A:OP B:BACK C:PLAY");
 
     MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel));
 }
@@ -142,9 +167,30 @@ void MdxOperatorScreen_Handle(const void* input)
 
     if (i == NULL) return;
 
-    /* parameter selection */
-    if (i->up)   { if (s_sel > 0)      s_sel--; MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel)); }
-    if (i->down) { if (s_sel < (PARAM_COUNT - 1)) s_sel++; MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel)); }
+    /* parameter selection (dirty-rect repaint of the selection highlight only;
+     * the widget `selected` flag drives DrawSelectedBox, so redraw the old and
+     * new param rows instead of a full-screen clear). */
+    if (i->up)
+    {
+        if (s_sel > 0)
+        {
+            draw_param(s_sel);
+            s_sel--;
+            draw_param(s_sel);
+        }
+        MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel));
+    }
+
+    if (i->down)
+    {
+        if (s_sel < (PARAM_COUNT - 1))
+        {
+            draw_param(s_sel);
+            s_sel++;
+            draw_param(s_sel);
+        }
+        MdxUi_MoveCursor(0, (u16)(ROW0 + s_sel));
+    }
 
     /* cycle the operator being edited */
     if (i->a)

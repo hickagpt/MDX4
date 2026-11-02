@@ -56,6 +56,15 @@ static u8      s_keyOn = 0;
 #define MINI_W           18
 #define MINI_H           16
 
+/* LCD window that frames the routing diagram: a recessed green plate drawn with
+ * MdxGfx_DrawReadout (PAL2 RD_* tiles). 1 tile taller than the diagram so the
+ * 4th operator cell (S4, rows 24..26) stays inside the plate's interior. The
+ * W5 tiles 0x0196..0x019B are the routing's own range and are NOT relocated. */
+#define MINI_WIN_X       MINI_X0
+#define MINI_WIN_Y       MINI_Y0
+#define MINI_WIN_W       MINI_W
+#define MINI_WIN_H       (MINI_H + 1)
+
 static bool s_miniTilesReady = FALSE;
 
 #define MINI_CHR(idx)  TILE_ATTR_FULL(MDXGFX_PAL_CHROME, 0, FALSE, FALSE, (idx))
@@ -137,10 +146,16 @@ static void draw_mini_diagram(void)
     u8 op, i, j;
     char lbl[3];
 
-    /* clear only the mini-diagram region (keeps NAME/OP/ALG/header/cursor) */
-    VDP_fillTileMapRect(BG_A, MINI_CHR(MINI_BLANK), MINI_X0, MINI_Y0, MINI_W, MINI_H);
+    /* LCD window (recessed green plate) framing the routing diagram. This also
+     * replaces the old transparent clear: the plate fills the area so the routing
+     * sits on a continuous LCD field. The W5 tiles 0x0196..0x019B (MODFILL /
+     * CARFILL / SELFILL / VLINE / HSTUB) still draw on top below, unchanged, and
+     * MINI_BLANK stays loaded in mini_gen_tiles (the range is preserved, not
+     * relocated). Topology derivation (GetTopology / carrierMask / modulators /
+     * current-op) is untouched. */
+    MdxGfx_DrawReadout(MINI_WIN_X, MINI_WIN_Y, MINI_WIN_W, MINI_WIN_H);
 
-    MdxUi_DrawText(1, MINI_Y0, "ROUTING");
+    MdxUi_DrawText(2, (u16)(MINI_WIN_Y + 1), "ROUTING");
 
     /* links first (under the nodes) */
     for (i = 1; i < 4; i++)
@@ -189,82 +204,119 @@ static void draw_mini_diagram(void)
 static const u8 s_row[6] = { ROW_ALGORITHM, ROW_OPERATOR, ROW_ENVELOPE, ROW_MODULATION, ROW_PATCH, ROW_PERFORMANCE };
 
 
-/* --- per-row redraw helpers (clear the line, then draw). --- */
+/* --- per-row redraw helpers (paint the skin plate, then draw on top). ---
+ *
+ * Screen-local layout (inside PAGE_*): the device shell paints a charcoal bezel
+ * + DX-Green panel once on Enter; every row below renders INSIDE that panel
+ * (cols 2..37, rows 2..25). The three primary fields (NAME / ALGORITHM /
+ * OPERATOR) are shown on green-LCD readout plates (MdxGfx_DrawReadout, PAL2).
+ * Row labels and the <A> control hints are restyled onto green skin plates
+ * (MdxGfx_DrawPanel, PAL2) with the SGDK text font (PAL0) drawn on top.
+ * Plates are 2 tiles tall and stacked on consecutive rows, so their shared edge
+ * reads as a divider. Each helper repaints only its own region (no full redraw). */
+
+static void draw_name(void)
+{
+    /* Patch NAME: recessed green-LCD readout plate (right of the top row). */
+    MdxGfx_DrawReadout(24, ROW_ALGORITHM, 14, 2);
+    MdxGfx_DrawReadoutStr(26, ROW_ALGORITHM, s_patch.name);
+}
 
 static void draw_algorithm(void)
 {
-    MdxUi_ClearLine(ROW_ALGORITHM);
-    MdxUi_DrawText(1, ROW_ALGORITHM, "ALGORITHM");
-    MdxUi_DrawNumber(11, ROW_ALGORITHM, s_patch.algorithm, 2);
-    MdxUi_DrawText(14, ROW_ALGORITHM, "<A>");
+    MdxGfx_DrawPanel(2, ROW_ALGORITHM, 11, 2);
+    MdxUi_DrawText(3, ROW_ALGORITHM, "ALGORITHM");
+    MdxGfx_DrawReadout(13, ROW_ALGORITHM, 5, 2);
+    MdxGfx_DrawReadoutNum(14, ROW_ALGORITHM, s_patch.algorithm, 2);
+    MdxGfx_DrawPanel(18, ROW_ALGORITHM, 6, 2);
+    MdxUi_DrawText(19, ROW_ALGORITHM, "<A>");
 }
 
 static void draw_operator(void)
 {
-    MdxUi_ClearLine(ROW_OPERATOR);
-    MdxUi_DrawText(1, ROW_OPERATOR, "OPERATOR");
-    MdxUi_DrawNumber(11, ROW_OPERATOR, (u16)(MdxUi_GetOperator() + 1), 1);
-    MdxUi_DrawText(14, ROW_OPERATOR, "<A>");
+    MdxGfx_DrawPanel(2, ROW_OPERATOR, 11, 2);
+    MdxUi_DrawText(3, ROW_OPERATOR, "OPERATOR");
+    MdxGfx_DrawReadout(13, ROW_OPERATOR, 5, 2);
+    MdxGfx_DrawReadoutNum(14, ROW_OPERATOR, (u16)(MdxUi_GetOperator() + 1), 1);
+    MdxGfx_DrawPanel(18, ROW_OPERATOR, 6, 2);
+    MdxUi_DrawText(19, ROW_OPERATOR, "<A>");
 }
 
 static void draw_op_params(void)
 {
     const FMOperator* op = &s_patch.operators[MdxUi_GetOperator()];
-    MdxUi_ClearLine(4);
-    MdxUi_DrawText(1, 4, "MUL");
-    MdxUi_DrawNumber(5, 4, op->multiplier, 2);
-    MdxUi_DrawText(9, 4, "DT");
-    MdxUi_DrawNumber(12, 4, op->detune, 1);
-    MdxUi_DrawText(15, 4, "TL");
-    MdxUi_DrawNumber(18, 4, op->totalLevel, 3);
+    MdxGfx_DrawPanel(2, 4, 30, 2);
+    /* MUL : rotary knob (0..15) */
+    MdxUi_DrawText(3, 4, "MUL");
+    MdxGfx_DrawKnob(7, 4, op->multiplier, 15, FALSE);
+    MdxUi_DrawNumber(9, 4, op->multiplier, 2);
+    /* DT : rotary knob (0..7) */
+    MdxUi_DrawText(13, 4, "DT");
+    MdxGfx_DrawKnob(16, 4, op->detune, 7, FALSE);
+    MdxUi_DrawNumber(18, 4, op->detune, 1);
+    /* TL : horizontal fader (0..127) */
+    MdxUi_DrawText(20, 4, "TL");
+    MdxGfx_DrawFaderH(23, 4, 5, op->totalLevel, 127, FALSE);
+    MdxUi_DrawNumber(29, 4, op->totalLevel, 3);
 }
 
 static void draw_envelope(void)
 {
     const FMOperator* op = &s_patch.operators[MdxUi_GetOperator()];
-    MdxUi_ClearLine(ROW_ENVELOPE);
-    MdxUi_DrawText(1, ROW_ENVELOPE, "ENV AR");
-    MdxUi_DrawNumber(8, ROW_ENVELOPE, op->attackRate, 2);
-    MdxUi_DrawText(12, ROW_ENVELOPE, "D1");
-    MdxUi_DrawNumber(16, ROW_ENVELOPE, op->decay1Rate, 2);
-    MdxUi_DrawText(19, ROW_ENVELOPE, "SL");
-    MdxUi_DrawNumber(22, ROW_ENVELOPE, op->sustainLevel, 2);
-    MdxUi_DrawText(25, ROW_ENVELOPE, "RR");
-    MdxUi_DrawNumber(28, ROW_ENVELOPE, op->releaseRate, 2);
-    MdxUi_DrawText(32, ROW_ENVELOPE, "<A>");
+    MdxGfx_DrawPanel(2, ROW_ENVELOPE, 30, 2);
+    MdxUi_DrawText(3, ROW_ENVELOPE, "AR");
+    MdxUi_DrawNumber(6, ROW_ENVELOPE, op->attackRate, 2);
+    MdxUi_DrawText(9, ROW_ENVELOPE, "D1");
+    MdxUi_DrawNumber(12, ROW_ENVELOPE, op->decay1Rate, 2);
+    MdxUi_DrawText(15, ROW_ENVELOPE, "SL");
+    MdxUi_DrawNumber(18, ROW_ENVELOPE, op->sustainLevel, 2);
+    MdxUi_DrawText(21, ROW_ENVELOPE, "RR");
+    MdxUi_DrawNumber(24, ROW_ENVELOPE, op->releaseRate, 2);
+    MdxGfx_DrawPanel(33, ROW_ENVELOPE, 5, 2);
+    MdxUi_DrawText(34, ROW_ENVELOPE, "<A>");
 }
 
 static void draw_modulation(void)
 {
-    MdxUi_ClearLine(ROW_MODULATION);
-    MdxUi_DrawText(1, ROW_MODULATION, "FB");
-    MdxUi_DrawNumber(4, ROW_MODULATION, s_patch.feedback, 1);
-    MdxUi_DrawText(8, ROW_MODULATION, "LFO");
-    MdxUi_DrawNumber(12, ROW_MODULATION, s_patch.lfoEnabled, 1);
-    MdxUi_DrawText(15, ROW_MODULATION, "<A>");
+    MdxGfx_DrawPanel(2, ROW_MODULATION, 30, 2);
+    MdxUi_DrawText(3, ROW_MODULATION, "FB");
+    MdxUi_DrawNumber(6, ROW_MODULATION, s_patch.feedback, 1);
+    MdxUi_DrawText(9, ROW_MODULATION, "LFO");
+    MdxUi_DrawNumber(13, ROW_MODULATION, s_patch.lfoEnabled, 1);
+    MdxGfx_DrawPanel(33, ROW_MODULATION, 5, 2);
+    MdxUi_DrawText(34, ROW_MODULATION, "<A>");
 }
 
 static void draw_patch(void)
 {
-    MdxUi_ClearLine(ROW_PATCH);
-    MdxUi_DrawText(1, ROW_PATCH, "PATCH MANAGER");
-    MdxUi_DrawText(18, ROW_PATCH, "<A>");
+    MdxGfx_DrawPanel(2, ROW_PATCH, 30, 2);
+    MdxUi_DrawText(3, ROW_PATCH, "PATCH MANAGER");
+    MdxGfx_DrawPanel(33, ROW_PATCH, 5, 2);
+    MdxUi_DrawText(34, ROW_PATCH, "<A>");
 }
 
 static void draw_performance(void)
 {
-    MdxUi_ClearLine(ROW_PERFORMANCE);
-    MdxUi_DrawText(1, ROW_PERFORMANCE, "PERFORMANCE");
-    MdxUi_DrawText(16, ROW_PERFORMANCE, "<A>");
+    MdxGfx_DrawPanel(2, ROW_PERFORMANCE, 30, 2);
+    MdxUi_DrawText(3, ROW_PERFORMANCE, "PERFORMANCE");
+    MdxGfx_DrawPanel(33, ROW_PERFORMANCE, 5, 2);
+    MdxUi_DrawText(34, ROW_PERFORMANCE, "<A>");
 }
 
 
 static void draw_key(void)
 {
-    MdxUi_ClearLine(7);
-    MdxUi_DrawText(1, 7, "KEY:");
-    MdxUi_DrawText(6, 7, s_keyOn ? "ON " : "-- ");
-    MdxUi_DrawText(11, 7, "C=PLAY");
+    MdxGfx_DrawPanel(2, 7, 30, 2);
+    MdxUi_DrawText(3, 7, "KEY:");
+    MdxUi_DrawText(8, 7, s_keyOn ? "ON " : "-- ");
+    MdxUi_DrawText(13, 7, "C=PLAY");
+}
+
+
+static void draw_control_hint(void)
+{
+    MdxGfx_DrawPanel(2, 10, 36, 2);
+    MdxUi_DrawText(3, 10, "A:EDIT  B:BACK  C:PLAY  START:MENU");
 }
 
 
@@ -273,20 +325,20 @@ static void draw_key(void)
 void MdxMainScreen_Enter(void)
 {
     /* full render once */
-    MdxGfx_Init();          /* generate chrome palette + base tiles (idempotent).
-                               Main screen boots FIRST, so the toolkit MUST init here. */
+    MdxGfx_Init();          /* generate chrome palette + base/skin tiles
+                               (idempotent + guarded). Main screen boots FIRST. */
     mini_gen_tiles();       /* generate the mini-diagram's own tiles (once) */
     MdxSynth_GetPatch(&s_patch);
     s_sel = 0;
     s_keyOn = MdxSynth_IsKeyOn() ? 1 : 0;
 
-    MdxUi_ClearLine(0);
-    MdxUi_DrawText(1, 0, "MDX-4 FM SYNTH");
+    /* Device shell: charcoal bezel + DX-Green panel. Drawn ONCE here, after the
+     * screen clear and BEFORE any content, so every migrated screen lands inside
+     * the same PAGE_* rectangle. MdxGfx_DrawDeviceShell() is a one-shot paint. */
+    MdxUi_ClearScreen();
+    MdxGfx_DrawDeviceShell();
 
-    MdxUi_ClearLine(1);
-    MdxUi_DrawText(1, 1, "NAME:");
-    MdxUi_DrawText(7, 1, s_patch.name);
-
+    draw_name();            /* patch NAME readout (top-right LCD plate) */
     draw_algorithm();
     draw_operator();
     draw_op_params();
@@ -295,10 +347,8 @@ void MdxMainScreen_Enter(void)
     draw_patch();
     draw_performance();
     draw_key();
-    draw_mini_diagram();           /* W5: mini routing diagram in the free region */
-
-    MdxUi_ClearLine(10);
-    MdxUi_DrawText(1, 10, "A:EDIT  B:BACK  C:PLAY  START:MENU");
+    draw_control_hint();    /* bottom control-hint strip */
+    draw_mini_diagram();    /* W5: mini routing diagram in the free region */
 
     MdxUi_MoveCursor(0, s_row[s_sel]);
 }
